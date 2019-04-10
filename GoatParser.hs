@@ -46,7 +46,7 @@ myReserved
      "int", "bool", "float", "true", "false", "string",
      "if", "then", "else", "fi",
      "while", "do", "od",
-     "read", "write"]
+     "read", "write", "call"]
 
 myOpnames 
   = ["+", "-", "*", "/", ":=", "||", "&&", 
@@ -225,6 +225,7 @@ pCall
       reserved "call"
       ident <- identifier
       explist <- parens (sepBy pExp comma)
+      semi
       return (Call ident explist)
 
 -----------------------------------------------------------------
@@ -252,7 +253,7 @@ pString
     "string"
 
 pOrOp, pAndOp, pRelationalOp, pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
-pOr, pAnd, pNot, pRelational, pAddMinus, pMulDiv :: Parser Expr
+pOr, pAnd, pNot, pRelational, pAddMinus, pFactor :: Parser Expr
 
 pOrOp
   = do
@@ -289,15 +290,15 @@ pNot
 pRelationalOp
   = do { reservedOp "="; return Equal }
     <|>
-    do { reserved "!="; return NotEqual }
+    do { reservedOp "!="; return NotEqual }
     <|>
-    do { reserved "<="; return LessEqual }
+    do { reservedOp "<="; return LessEqual }
     <|>
-    do { reserved "<"; return Less }
+    do { reservedOp "<"; return Less }
     <|>
-    do { reserved ">="; return GreaterEqual }
+    do { reservedOp ">="; return GreaterEqual }
     <|>
-    do { reserved ">"; return Greater }
+    do { reservedOp ">"; return Greater }
 
 pRelational
   = chainl1 pAddMinus pAddMinusOp
@@ -309,20 +310,20 @@ pAddMinusOp
     do { reserved "-"; return Minus }
 
 pAddMinus
- = chainl1 pMulDiv pMulDivOp
+ = chainl1 pFactor pMulDivOp
 
 pMulDivOp
   = do { reservedOp "*"; return Mul }
     <|>
     do { reserved "/"; return Div }
 
-pMulDiv
+pFactor
  = choice [pUminus, parens pExp, pConst, pVarExp]
 
 pUminus
   = do 
       reservedOp "-"
-      exp <- pMulDiv
+      exp <- pFactor
       return (UnaryMinus exp)
 
 pConst
