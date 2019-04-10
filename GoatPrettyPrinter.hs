@@ -64,18 +64,18 @@ ppStmt :: Int -> Stmt -> String
 ppStmt ind stmt = prefix ++ pstmt where
   prefix = concat $ take ind (repeat indent)
   pstmt = case stmt of
-               Assign (Lvalue var) expr -> ppVariable var ++ " := " ++ ppExpr expr ++ ";\n"
+               Assign (Lvalue var) expr -> ppVariable var ++ " := " ++ ppTopLevelExpr expr ++ ";\n"
                Read (Lvalue var) -> "read " ++ ppVariable var ++ ";\n"
-               Write expr -> "write " ++ ppExpr expr ++ ";\n"
-               Call id exprs -> "call " ++ id ++ "(" ++ ppSeperate ", " [ppExpr expr | expr <- exprs] ++ ");\n"
-               If expr stmts -> "if " ++ ppExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "fi\n"
+               Write expr -> "write " ++ ppTopLevelExpr expr ++ ";\n"
+               Call id exprs -> "call " ++ id ++ "(" ++ ppSeperate ", " [ppTopLevelExpr expr | expr <- exprs] ++ ");\n"
+               If expr stmts -> "if " ++ ppTopLevelExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "fi\n"
                IfElse expr stmts1 stmts2 ->
-                 "if " ++ ppExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts1] ++ prefix ++ "else\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts2] ++ prefix ++ "fi\n"
-               While expr stmts -> "while " ++ ppExpr expr ++ " do\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "od\n"
+                 "if " ++ ppTopLevelExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts1] ++ prefix ++ "else\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts2] ++ prefix ++ "fi\n"
+               While expr stmts -> "while " ++ ppTopLevelExpr expr ++ " do\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "od\n"
 
 -- the top level expression do not need a bracket               
 ppTopLevelExpr :: Expr -> String
-ppTopLevelExpr = pexpr where
+ppTopLevelExpr expr = pexpr where
   pexpr = case expr of
                Var variable -> ppVariable variable
                BoolConst b -> show b
@@ -83,18 +83,18 @@ ppTopLevelExpr = pexpr where
                FloatConst f -> show f
                StrConst s -> "\"" ++ s ++ "\""
                Bracket expr -> ppExpr expr
-               Or expr1 expr2 -> "(" ++ ppExpr expr1 ++ " || " ++ ppExpr expr2 ++ ")"
-               And expr1 expr2 -> "(" ++ ppExpr expr1 ++ " && " ++ ppExpr expr2 ++ ")"
-               Equal expr1 expr2 -> "(" ++ ppExpr expr1 ++ " = " ++ ppExpr expr2 ++ ")"
-               NotEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " != " ++ ppExpr expr2 ++ ")"
-               Less expr1 expr2 -> "(" ++ ppExpr expr1 ++ " < " ++ ppExpr expr2 ++ ")"
-               LessEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " <= " ++ ppExpr expr2 ++ ")"
-               Greater expr1 expr2 -> "(" ++ ppExpr expr1 ++ " > " ++ ppExpr expr2 ++ ")"
-               GreaterEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " >= " ++ ppExpr expr2 ++ ")"
-               Add expr1 expr2 -> "(" ++ ppExpr expr1 ++ " + " ++ ppExpr expr2 ++ ")"
-               Minus expr1 expr2 -> "(" ++ ppExpr expr1 ++ " - " ++ ppExpr expr2 ++ ")"
-               Mul expr1 expr2 -> "(" ++ ppExpr expr1 ++ " * " ++ ppExpr expr2 ++ ")"
-               Div expr1 expr2 -> "(" ++ ppExpr expr1 ++ " / " ++ ppExpr expr2 ++ ")"
+               Or expr1 expr2 -> ppExpr expr1 ++ " || " ++ ppExpr expr2
+               And expr1 expr2 -> ppExpr expr1 ++ " && " ++ ppExpr expr2
+               Equal expr1 expr2 -> ppExpr expr1 ++ " = " ++ ppExpr expr2
+               NotEqual expr1 expr2 -> ppExpr expr1 ++ " != " ++ ppExpr expr2
+               Less expr1 expr2 -> ppExpr expr1 ++ " < " ++ ppExpr expr2
+               LessEqual expr1 expr2 -> ppExpr expr1 ++ " <= " ++ ppExpr expr2
+               Greater expr1 expr2 -> ppExpr expr1 ++ " > " ++ ppExpr expr2
+               GreaterEqual expr1 expr2 -> ppExpr expr1 ++ " >= " ++ ppExpr expr2
+               Add expr1 expr2 -> ppExpr expr1 ++ " + " ++ ppExpr expr2
+               Minus expr1 expr2 -> ppExpr expr1 ++ " - " ++ ppExpr expr2
+               Mul expr1 expr2 -> ppExpr expr1 ++ " * " ++ ppExpr expr2
+               Div expr1 expr2 -> ppExpr expr1 ++ " / " ++ ppExpr expr2
                UnaryMinus expr -> "-" ++ ppExpr expr
                Not expr -> "! " ++ ppExpr expr
 

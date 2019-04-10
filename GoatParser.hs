@@ -238,10 +238,6 @@ pExp, pUminus, pConst, pVarExp, pString :: Parser Expr
 pExp 
   = pString
     <|>
-    pConst
-    <|>
-    parens pExp
-    <|>
     (chainl1 pOr pOrOp)
     <?>
     "expression"
