@@ -1,4 +1,4 @@
-module Main where
+module GoatParser where
 
 import GoatAST
 import GoatPrettyPrinter
@@ -6,8 +6,6 @@ import Data.Char
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import qualified Text.Parsec.Token as Q
-import System.Environment
-import System.Exit
 
 type Parser a
   = Parsec String Int a
@@ -307,7 +305,7 @@ pRelational
 pAddMinusOp
   = do { reservedOp "+"; return Add }
     <|>
-    do { reserved "-"; return Minus }
+    do { reservedOp "-"; return Minus }
 
 pAddMinus
  = chainl1 pFactor pMulDivOp
@@ -315,7 +313,7 @@ pAddMinus
 pMulDivOp
   = do { reservedOp "*"; return Mul }
     <|>
-    do { reserved "/"; return Div }
+    do { reservedOp "/"; return Div }
 
 pFactor
  = choice [pUminus, parens pExp, pConst, pVarExp]
@@ -374,27 +372,6 @@ pMain
       eof
       return p
 
-main :: IO ()
-main
-  = do { progname <- getProgName
-        ; args <- getArgs
-        ; checkArgs progname args
-        ; input <- readFile (head args)
-        ; let output = runParser pMain 0 "" input
-        ; let command = head (tail args)
-        ; case output of
-            Right ast -> putStr $ ppProg ast
-            --Right ast -> print ast
-            Left  err -> do { putStr "Parse error at "
-                            ; print err
-                            }
-        }
-
-checkArgs :: String -> [String] -> IO ()
-checkArgs _ [filename]
-    = return ()
-checkArgs progname _
-    = do { putStrLn ("Usage: " ++ progname ++ " filename\n\n")
-        ; exitWith (ExitFailure 1)
-        }
+parseGoat :: String -> Either ParseError GoatProgram
+parseGoat = runParser pMain 0 ""
 

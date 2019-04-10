@@ -5,20 +5,21 @@ import GoatAST
 indent :: String
 indent = "    "
 
-ppProg :: GoatProgram -> String
-ppProg program = pprog where
+prettyprintGoat :: GoatProgram -> String
+prettyprintGoat program = pprog where
   Program proc1 mainproc proc2 = program
   MainProc maindecls mainstmts = mainproc
-  pprog = concat [ppProc proc | proc <- proc1] 
-    ++ ppProc (Proc "main" [] maindecls mainstmts)
-    ++ concat [ppProc proc | proc <- proc2] 
+  pprocs = [ppProc proc | proc <- proc1] 
+    ++ [ppProc (Proc "main" [] maindecls mainstmts)]
+    ++ [ppProc proc | proc <- proc2]
+  pprog = ppSeperate "\n" pprocs
 
 ppProc :: Proc -> String
 ppProc proc = pheader ++ pdecls ++ pbody where
   Proc id params decls stmts = proc
   pheader = "proc " ++ id ++ " (" ++ (ppParams params) ++ ")\n"
   pdecls = foldl (\x y -> x ++ indent ++ y ++ "\n") "" [ppDecl decl | decl <- decls]
-  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n\n"
+  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n"
 
 ppParams :: [Param] -> String
 ppParams [] = []
@@ -96,7 +97,7 @@ ppTopLevelExpr expr = pexpr where
                Mul expr1 expr2 -> ppExpr expr1 ++ " * " ++ ppExpr expr2
                Div expr1 expr2 -> ppExpr expr1 ++ " / " ++ ppExpr expr2
                UnaryMinus expr -> "-" ++ ppExpr expr
-               Not expr -> "! " ++ ppExpr expr
+               Not expr -> "!" ++ ppExpr expr
 
                
 ppExpr :: Expr -> String
@@ -128,8 +129,8 @@ ppVariable :: Variable -> String
 ppVariable var = pvar where
   pvar = case var of
               Prim id -> id
-              Arr id expr -> id ++ "[" ++ (ppExpr expr) ++ "]"
-              Mat id expr1 expr2 -> id ++ "[" ++ (ppExpr expr1) ++ ", " ++ (ppExpr expr2) ++ "]"      
+              Arr id expr -> id ++ "[" ++ (ppTopLevelExpr expr) ++ "]"
+              Mat id expr1 expr2 -> id ++ "[" ++ (ppTopLevelExpr expr1) ++ ", " ++ (ppTopLevelExpr expr2) ++ "]"      
 
 ppSeperate :: String -> [String] -> String
 ppSeperate sep [] = []
