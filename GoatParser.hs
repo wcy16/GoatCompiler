@@ -96,10 +96,7 @@ pProc
 
 pParams :: Parser [Param]
 pParams
-  = do
-      firstparam <- pParam
-      nextparam <- many pNextParam
-      return (firstparam:nextparam)
+  = sepBy pParam comma
 
 pParam :: Parser Param
 pParam
@@ -114,13 +111,6 @@ pParam
                   return (DTBaseType basetype)
       whiteSpace
       return (Param paramtype datatype ident)
-
-pNextParam :: Parser Param
-pNextParam
-  = do
-      comma
-      param <- pParam
-      return param
     
 pBaseType :: Parser BaseType
 pBaseType
@@ -129,34 +119,6 @@ pBaseType
     do { reserved "int"; return IntType }
     <|>
     do { reserved "float"; return FloatType }
-
--- pDataType :: Parser DataType
--- pDataType
---   = pArrayType
---     <|>
---     do { basetype <- pBaseType; return (DTBaseType basetype) }
---     <|>
---     do {reserved "string"; return DTStringType }
--- pDataType :: Parser DataType
--- pDataType
---   = do
---       basetype <- pBaseType
---       datatype <- do
---                     shape <- brackets pArrayShape
---                     return (DTArrayType (ArrayType basetype shape))
---                   <|>
---                   return (DTBaseType basetype)
---       return datatype
-
--- pArrayType :: Parser DataType   -- todo
--- pArrayType
---   = do 
---       try $ do
---         basetype <- pBaseType
---         shape <- brackets pArrayShape
---         return shape
---       return (DTArrayType basetype shape)
-    
 
 pArrayShape :: Parser ArrayShape  -- todo
 pArrayShape
@@ -262,23 +224,8 @@ pCall
   = do
       reserved "call"
       ident <- identifier
-      explist <- parens pExpList
+      explist <- parens (sepBy pExp comma)
       return (Call ident explist)
-
-pExpList :: Parser [Expr]
-pExpList
-  = do
-      firstExpr <- pExp
-      nextExpr <- many pNextExp
-      return (firstExpr:nextExpr)
-      
-
-pNextExp :: Parser Expr
-pNextExp
-  = do
-      comma
-      exp <- pExp
-      return exp
 
 -----------------------------------------------------------------
 --  pExp is the main parser for expressions. It takes into account
@@ -286,9 +233,7 @@ pNextExp
 --  are left-associative.
 -----------------------------------------------------------------
 
-pExp, pUminus, pConst, pIdent, pString :: Parser Expr
-
-
+pExp, pUminus, pConst, pVarExp, pString :: Parser Expr
 
 pExp 
   = pString
@@ -376,7 +321,7 @@ pMulDivOp
     do { reserved "/"; return Div }
 
 pMulDiv
- = choice [pUminus, parens pExp, pConst, pIdent]
+ = choice [pUminus, parens pExp, pConst, pVarExp]
 
 pUminus
   = do 
@@ -393,41 +338,30 @@ pConst
     <|>
     do { reserved "false"; return (BoolConst False) }
 
-pIdent 
+pVarExp 
   = do
-      ident <- identifier
-      option (Id ident) $ brackets $ do
-                                      m <- pExp
-                                      option (Array ident m) $ do
-                                                                comma
-                                                                n <- pExp
-                                                                return (Matrix ident m n)
-
+      var <- pVar
+      return (Var var)
     <?>
     "identifier"
+
+pVar :: Parser Variable
+pVar
+  = do
+      ident <- identifier
+      option (Prim ident) $ brackets $ do
+        m <- pExp
+        option (Arr ident m) $ do
+                                  comma
+                                  n <- pExp
+                                  return (Mat ident m n)
+
 
 pLvalue :: Parser Lvalue   ---todo
 pLvalue
   = do
-      ident <- identifier
-      option (LId ident) $ brackets $ do
-                                      m <- pExp
-                                      option (LArr ident m) $ do
-                                                                comma
-                                                                n <- pExp
-                                                                return (LMat ident m n)
-                                      
-      -- do
-      --   shape <- brackets $ do
-      --                         m <- pExp
-      --                         do
-      --                           comma
-      --                           n <- pExp
-      --                           return (LMat ident m n)
-      --                           <|>
-      --                           return (LArr ident m)
-      --   <|>
-      --   return (LId ident)
+      var <- pVar
+      return (Lvalue var)
     <?>
     "lvalue"
       
@@ -452,8 +386,8 @@ main
         ; let output = runParser pMain 0 "" input
         ; let command = head (tail args)
         ; case output of
-            --Right ast -> putStr $ ppProg ast
-            Right ast -> print ast
+            Right ast -> putStr $ ppProg ast
+            --Right ast -> print ast
             Left  err -> do { putStr "Parse error at "
                             ; print err
                             }

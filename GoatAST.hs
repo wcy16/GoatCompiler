@@ -20,10 +20,14 @@ data DataType
   | DTArrayType ArrayType
   deriving (Show, Eq)
 
+data Variable
+  = Prim Ident   -- primitive type
+  | Arr Ident Expr
+  | Mat Ident Expr Expr
+  deriving (Show, Eq)
+
 data Lvalue 
-  = LId Ident
-  | LArr Ident Expr
-  | LMat Ident Expr Expr
+  = Lvalue Variable
     deriving (Show, Eq)
 
 data Unaop
@@ -38,9 +42,7 @@ data Binop
     deriving (Show, Eq)
 
 data Expr
-  = Id Ident
-  | Array Ident Expr
-  | Matrix Ident Expr Expr
+  = Var Variable
   | BoolConst Bool | IntConst Int | FloatConst Float | StrConst String
   | Bracket Expr
   | Or Expr Expr

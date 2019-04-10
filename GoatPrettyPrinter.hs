@@ -18,7 +18,7 @@ ppProc proc = pheader ++ pdecls ++ pbody where
   Proc id params decls stmts = proc
   pheader = "proc " ++ id ++ " (" ++ (ppParams params) ++ ")\n"
   pdecls = foldl (\x y -> x ++ indent ++ y ++ "\n") "" [ppDecl decl | decl <- decls]
-  pbody = "begin\nend\n"  -- todo
+  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n"  -- todo
 
 ppParams :: [Param] -> String
 ppParams [] = []
@@ -39,8 +39,6 @@ ppDecl :: Decl -> String
 ppDecl decl = (ppDataType datatype id) ++ ";" where
   Decl id datatype = decl
   
-
-
 ppBaseType :: BaseType -> Ident -> String
 ppBaseType basetype id = typename ++ id where
   typename = case basetype of
@@ -60,3 +58,80 @@ ppDataType :: DataType -> Ident -> String
 ppDataType datatype id = case datatype of
                               DTBaseType basetype -> ppBaseType basetype id
                               DTArrayType arraytype -> ppArrayType arraytype id
+
+
+ppStmt :: Int -> Stmt -> String
+ppStmt ind stmt = prefix ++ pstmt where
+  prefix = concat $ take ind (repeat indent)
+  pstmt = case stmt of
+               Assign (Lvalue var) expr -> ppVariable var ++ " := " ++ ppExpr expr ++ ";\n"
+               Read (Lvalue var) -> "read " ++ ppVariable var ++ ";\n"
+               Write expr -> "write " ++ ppExpr expr ++ ";\n"
+               Call id exprs -> "call " ++ id ++ "(" ++ ppSeperate ", " [ppExpr expr | expr <- exprs] ++ ");\n"
+               If expr stmts -> "if " ++ ppExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "fi\n"
+               IfElse expr stmts1 stmts2 ->
+                 "if " ++ ppExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts1] ++ prefix ++ "else\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts2] ++ prefix ++ "fi\n"
+               While expr stmts -> "while " ++ ppExpr expr ++ " do\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "od\n"
+
+-- the top level expression do not need a bracket               
+ppTopLevelExpr :: Expr -> String
+ppTopLevelExpr = pexpr where
+  pexpr = case expr of
+               Var variable -> ppVariable variable
+               BoolConst b -> show b
+               IntConst i -> show i
+               FloatConst f -> show f
+               StrConst s -> "\"" ++ s ++ "\""
+               Bracket expr -> ppExpr expr
+               Or expr1 expr2 -> "(" ++ ppExpr expr1 ++ " || " ++ ppExpr expr2 ++ ")"
+               And expr1 expr2 -> "(" ++ ppExpr expr1 ++ " && " ++ ppExpr expr2 ++ ")"
+               Equal expr1 expr2 -> "(" ++ ppExpr expr1 ++ " = " ++ ppExpr expr2 ++ ")"
+               NotEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " != " ++ ppExpr expr2 ++ ")"
+               Less expr1 expr2 -> "(" ++ ppExpr expr1 ++ " < " ++ ppExpr expr2 ++ ")"
+               LessEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " <= " ++ ppExpr expr2 ++ ")"
+               Greater expr1 expr2 -> "(" ++ ppExpr expr1 ++ " > " ++ ppExpr expr2 ++ ")"
+               GreaterEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " >= " ++ ppExpr expr2 ++ ")"
+               Add expr1 expr2 -> "(" ++ ppExpr expr1 ++ " + " ++ ppExpr expr2 ++ ")"
+               Minus expr1 expr2 -> "(" ++ ppExpr expr1 ++ " - " ++ ppExpr expr2 ++ ")"
+               Mul expr1 expr2 -> "(" ++ ppExpr expr1 ++ " * " ++ ppExpr expr2 ++ ")"
+               Div expr1 expr2 -> "(" ++ ppExpr expr1 ++ " / " ++ ppExpr expr2 ++ ")"
+               UnaryMinus expr -> "-" ++ ppExpr expr
+               Not expr -> "! " ++ ppExpr expr
+
+               
+ppExpr :: Expr -> String
+ppExpr expr = pexpr where
+  pexpr = case expr of
+               Var variable -> ppVariable variable
+               BoolConst b -> show b
+               IntConst i -> show i
+               FloatConst f -> show f
+               StrConst s -> "\"" ++ s ++ "\""
+               Bracket expr -> ppExpr expr
+               Or expr1 expr2 -> "(" ++ ppExpr expr1 ++ " || " ++ ppExpr expr2 ++ ")"
+               And expr1 expr2 -> "(" ++ ppExpr expr1 ++ " && " ++ ppExpr expr2 ++ ")"
+               Equal expr1 expr2 -> "(" ++ ppExpr expr1 ++ " = " ++ ppExpr expr2 ++ ")"
+               NotEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " != " ++ ppExpr expr2 ++ ")"
+               Less expr1 expr2 -> "(" ++ ppExpr expr1 ++ " < " ++ ppExpr expr2 ++ ")"
+               LessEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " <= " ++ ppExpr expr2 ++ ")"
+               Greater expr1 expr2 -> "(" ++ ppExpr expr1 ++ " > " ++ ppExpr expr2 ++ ")"
+               GreaterEqual expr1 expr2 -> "(" ++ ppExpr expr1 ++ " >= " ++ ppExpr expr2 ++ ")"
+               Add expr1 expr2 -> "(" ++ ppExpr expr1 ++ " + " ++ ppExpr expr2 ++ ")"
+               Minus expr1 expr2 -> "(" ++ ppExpr expr1 ++ " - " ++ ppExpr expr2 ++ ")"
+               Mul expr1 expr2 -> "(" ++ ppExpr expr1 ++ " * " ++ ppExpr expr2 ++ ")"
+               Div expr1 expr2 -> "(" ++ ppExpr expr1 ++ " / " ++ ppExpr expr2 ++ ")"
+               UnaryMinus expr -> "-" ++ ppExpr expr
+               Not expr -> "! " ++ ppExpr expr
+
+
+ppVariable :: Variable -> String
+ppVariable var = pvar where
+  pvar = case var of
+              Prim id -> id
+              Arr id expr -> id ++ "[" ++ (ppExpr expr) ++ "]"
+              Mat id expr1 expr2 -> id ++ "[" ++ (ppExpr expr1) ++ ", " ++ (ppExpr expr2) ++ "]"      
+
+ppSeperate :: String -> [String] -> String
+ppSeperate sep [] = []
+ppSeperate sep (x:[]) = x
+ppSeperate sep (x:xs) = x ++ sep ++ ppSeperate sep xs
