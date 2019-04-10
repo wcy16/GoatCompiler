@@ -1,6 +1,7 @@
 module Main where
 
 import GoatAST
+import GoatPrettyPrinter
 import Data.Char
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
@@ -27,6 +28,7 @@ lexer
 whiteSpace = Q.whiteSpace lexer
 lexeme     = Q.lexeme lexer
 natural    = Q.natural lexer
+float      = Q.float lexer
 identifier = Q.identifier lexer
 colon      = Q.colon lexer
 semi       = Q.semi lexer
@@ -103,8 +105,13 @@ pParam :: Parser Param
 pParam
   = do
       paramtype <- do {reserved "val"; return Val} <|> do {reserved "ref"; return Ref}
-      datatype <- pDataType
+      basetype <- pBaseType
       ident <- identifier
+      datatype <- do
+                    shape <- brackets pArrayShape
+                    return (DTArrayType (ArrayType basetype shape))
+                  <|>
+                  return (DTBaseType basetype)
       whiteSpace
       return (Param paramtype datatype ident)
 
@@ -130,18 +137,16 @@ pBaseType
 --     do { basetype <- pBaseType; return (DTBaseType basetype) }
 --     <|>
 --     do {reserved "string"; return DTStringType }
-pDataType :: Parser DataType
-pDataType
-  = do 
-      basetype <- pBaseType
-      do
-        do
-          shape <- brackets pArrayShape
-          return (DTArrayType (ArrayType basetype shape))
-        <|>
-        return (DTBaseType basetype)
-    <|>
-    do {reserved "string"; return DTStringType }
+-- pDataType :: Parser DataType
+-- pDataType
+--   = do
+--       basetype <- pBaseType
+--       datatype <- do
+--                     shape <- brackets pArrayShape
+--                     return (DTArrayType (ArrayType basetype shape))
+--                   <|>
+--                   return (DTBaseType basetype)
+--       return datatype
 
 -- pArrayType :: Parser DataType   -- todo
 -- pArrayType
@@ -161,9 +166,9 @@ pArrayShape
         do
           comma
           n <- natural
-          return (MatrixShape m n)
+          return (MatrixShape (fromInteger m :: Int) (fromInteger n :: Int))
         <|>
-        return (ArrayShape m)
+        return (ArrayShape (fromInteger m :: Int))
       
       
       
@@ -184,8 +189,13 @@ pProgBody
 pDecl :: Parser Decl
 pDecl
   = do
-      datatype <- pDataType
+      basetype <- pBaseType
       ident <- identifier
+      datatype <- do
+                    shape <- brackets pArrayShape
+                    return (DTArrayType (ArrayType basetype shape))
+                  <|>
+                  return (DTBaseType basetype)
       whiteSpace
       semi
       return (Decl ident datatype)
@@ -197,10 +207,10 @@ pDecl
 --  read and write statements, and assignments.
 -----------------------------------------------------------------
 
-pStmt, pRead, pWrite, pAsg :: Parser Stmt
+pStmt, pRead, pWrite, pAsg, pCall, pIf, pWhile :: Parser Stmt
 
 pStmt 
-  = choice [pRead, pWrite, pAsg]
+  = choice [pRead, pWrite, pAsg, pCall, pIf, pWhile]
 
 pRead
   = do 
@@ -224,16 +234,70 @@ pAsg
       semi
       return (Assign lvalue rvalue)
 
+
+pIf
+  = do
+      reserved "if"
+      exp <- pExp
+      reserved "then"
+      stmt1 <- many pStmt
+      do
+        reserved "else"
+        stmt2 <- many pStmt
+        reserved "fi"
+        return (IfElse exp stmt1 stmt2)
+        <|>
+        do {reserved "fi"; return (If exp stmt1)}
+
+pWhile
+  = do
+      reserved "while"
+      exp <- pExp
+      reserved "do"
+      stmt <- many pStmt
+      reserved "od"
+      return (While exp stmt)
+
+pCall
+  = do
+      reserved "call"
+      ident <- identifier
+      explist <- parens pExpList
+      return (Call ident explist)
+
+pExpList :: Parser [Expr]
+pExpList
+  = do
+      firstExpr <- pExp
+      nextExpr <- many pNextExp
+      return (firstExpr:nextExpr)
+      
+
+pNextExp :: Parser Expr
+pNextExp
+  = do
+      comma
+      exp <- pExp
+      return exp
+
 -----------------------------------------------------------------
 --  pExp is the main parser for expressions. It takes into account
 --  the operator precedences and the fact that the binary operators
 --  are left-associative.
 -----------------------------------------------------------------
 
-pExp, pTerm, pFactor, pUminus, pNum, pIdent, pString :: Parser Expr
+pExp, pUminus, pConst, pIdent, pString :: Parser Expr
+
+
 
 pExp 
-  = pString <|> (chainl1 pTerm pAddOp)
+  = pString
+    <|>
+    pConst
+    <|>
+    parens pExp
+    <|>
+    (chainl1 pOr pOrOp)
     <?>
     "expression"
 
@@ -246,53 +310,124 @@ pString
     <?>
     "string"
 
-pAddOp, pMulOp :: Parser (Expr -> Expr -> Expr)
+pOrOp, pAndOp, pRelationalOp, pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
+pOr, pAnd, pNot, pRelational, pAddMinus, pMulDiv :: Parser Expr
 
-pAddOp
-  = do 
-      reservedOp "+"
-      return Add
+pOrOp
+  = do
+      reservedOp "||"
+      return Or
 
-pTerm 
-  = chainl1 pFactor pMulOp
-    <?>
-    "\"term\""
+pOr
+  = chainl1 pAnd pAndOp
 
-pMulOp
-  = do 
-      reservedOp "*"
-      return Mul
+pAndOp
+  = do
+      reservedOp "&&"
+      return And
 
-pFactor
-  = choice [pUminus, parens pExp, pNum, pIdent]
-    <?> 
-    "\"factor\""
+pAnd
+  = do
+      reservedOp "!"
+      exp <- pNot
+      return (Not exp)
+      <|>
+      pNot
+
+pNot
+  = do
+      exp1 <- pRelational
+      do
+        op <- pRelationalOp
+        exp2 <- pRelational
+        return (op exp1 exp2)
+        <|>
+        return exp1
+
+
+pRelationalOp
+  = do { reservedOp "="; return Equal }
+    <|>
+    do { reserved "!="; return NotEqual }
+    <|>
+    do { reserved "<="; return LessEqual }
+    <|>
+    do { reserved "<"; return Less }
+    <|>
+    do { reserved ">="; return GreaterEqual }
+    <|>
+    do { reserved ">"; return Greater }
+
+pRelational
+  = chainl1 pAddMinus pAddMinusOp
+      
+      
+pAddMinusOp
+  = do { reservedOp "+"; return Add }
+    <|>
+    do { reserved "-"; return Minus }
+
+pAddMinus
+ = chainl1 pMulDiv pMulDivOp
+
+pMulDivOp
+  = do { reservedOp "*"; return Mul }
+    <|>
+    do { reserved "/"; return Div }
+
+pMulDiv
+ = choice [pUminus, parens pExp, pConst, pIdent]
 
 pUminus
   = do 
       reservedOp "-"
-      exp <- pFactor
+      exp <- pMulDiv
       return (UnaryMinus exp)
 
-pNum
-  = do
-      n <- natural <?> ""
-      return (IntConst (fromInteger n :: Int))
-    <?>
-    "number"
+pConst
+  = do { n <- natural; return (IntConst (fromInteger n :: Int)) }
+    <|>
+    do { d <- float; return (FloatConst (realToFrac d)) }
+    <|>
+    do { reserved "true"; return (BoolConst True) }
+    <|>
+    do { reserved "false"; return (BoolConst False) }
 
 pIdent 
   = do
       ident <- identifier
-      return (Id ident)
+      option (Id ident) $ brackets $ do
+                                      m <- pExp
+                                      option (Array ident m) $ do
+                                                                comma
+                                                                n <- pExp
+                                                                return (Matrix ident m n)
+
     <?>
     "identifier"
 
-pLvalue :: Parser Lvalue
+pLvalue :: Parser Lvalue   ---todo
 pLvalue
   = do
       ident <- identifier
-      return (LId ident)
+      option (LId ident) $ brackets $ do
+                                      m <- pExp
+                                      option (LArr ident m) $ do
+                                                                comma
+                                                                n <- pExp
+                                                                return (LMat ident m n)
+                                      
+      -- do
+      --   shape <- brackets $ do
+      --                         m <- pExp
+      --                         do
+      --                           comma
+      --                           n <- pExp
+      --                           return (LMat ident m n)
+      --                           <|>
+      --                           return (LArr ident m)
+      --   <|>
+      --   return (LId ident)
     <?>
     "lvalue"
       
@@ -315,7 +450,9 @@ main
         ; checkArgs progname args
         ; input <- readFile (head args)
         ; let output = runParser pMain 0 "" input
+        ; let command = head (tail args)
         ; case output of
+            --Right ast -> putStr $ ppProg ast
             Right ast -> print ast
             Left  err -> do { putStr "Parse error at "
                             ; print err

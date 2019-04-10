@@ -7,8 +7,8 @@ data BaseType
     deriving (Show, Eq)
 
 data ArrayShape
-  = ArrayShape Integer
-  | MatrixShape Integer Integer
+  = ArrayShape Int
+  | MatrixShape Int Int
     deriving (Show, Eq)
 
 data ArrayType
@@ -18,13 +18,12 @@ data ArrayType
 data DataType
   = DTBaseType BaseType
   | DTArrayType ArrayType
-  | DTStringType
   deriving (Show, Eq)
 
 data Lvalue 
   = LId Ident
-  | LArr Ident Int
-  | LMat Ident Int Int
+  | LArr Ident Expr
+  | LMat Ident Expr Expr
     deriving (Show, Eq)
 
 data Unaop
