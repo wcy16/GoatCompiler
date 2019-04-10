@@ -7,18 +7,18 @@ indent = "    "
 
 ppProg :: GoatProgram -> String
 ppProg program = pprog where
-  Program mainproc procs = program
+  Program proc1 mainproc proc2 = program
   MainProc maindecls mainstmts = mainproc
-  pprog = foldl (\x y -> x ++ "\n" ++ y) 
-                (ppProc (Proc "main" [] maindecls mainstmts)) 
-                [ppProc proc | proc <- procs]
+  pprog = concat [ppProc proc | proc <- proc1] 
+    ++ ppProc (Proc "main" [] maindecls mainstmts)
+    ++ concat [ppProc proc | proc <- proc2] 
 
 ppProc :: Proc -> String
 ppProc proc = pheader ++ pdecls ++ pbody where
   Proc id params decls stmts = proc
   pheader = "proc " ++ id ++ " (" ++ (ppParams params) ++ ")\n"
   pdecls = foldl (\x y -> x ++ indent ++ y ++ "\n") "" [ppDecl decl | decl <- decls]
-  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n"  -- todo
+  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n\n"
 
 ppParams :: [Param] -> String
 ppParams [] = []

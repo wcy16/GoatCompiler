@@ -62,7 +62,7 @@ pProg
       proc1 <- many (try pProc)
       mainProc <- pMainProc
       proc2 <- many pProc
-      return (Program mainProc (proc1 ++ proc2))
+      return (Program proc1 mainProc proc2)
 
 -----------------------------------------------------------------
 --  pMainProc looks for the main procedure

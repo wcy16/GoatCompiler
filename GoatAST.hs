@@ -92,6 +92,6 @@ data MainProc
     deriving (Show, Eq)
 
 data GoatProgram
-  = Program MainProc [Proc]
+  = Program [Proc] MainProc [Proc]
     deriving (Show, Eq)
 
