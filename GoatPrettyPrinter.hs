@@ -1,3 +1,11 @@
+{-|
+Module      : GoatPrettyPrinter
+Description : A pretty printer for Goat programming language, generating a
+              well-formatted Goat source code from the abstract syntax tree.
+              It depends on GoatAST.hs.
+Author      : Chunyao Wang
+-}
+
 module GoatPrettyPrinter where
 
 import GoatAST
@@ -5,6 +13,7 @@ import GoatAST
 indent :: String
 indent = "    "
 
+-- | pretty printer for goat program
 prettyprintGoat :: GoatProgram -> String
 prettyprintGoat program = pprog where
   Program proc1 mainproc proc2 = program
@@ -12,15 +21,17 @@ prettyprintGoat program = pprog where
   pprocs = [ppProc proc | proc <- proc1] 
     ++ [ppProc (Proc "main" [] maindecls mainstmts)]
     ++ [ppProc proc | proc <- proc2]
-  pprog = ppSeperate "\n" pprocs
+  pprog = ppSeperate "\n\n" pprocs
 
+-- | pretty print the procedure
 ppProc :: Proc -> String
 ppProc proc = pheader ++ pdecls ++ pbody where
   Proc id params decls stmts = proc
   pheader = "proc " ++ id ++ " (" ++ (ppParams params) ++ ")\n"
   pdecls = foldl (\x y -> x ++ indent ++ y ++ "\n") "" [ppDecl decl | decl <- decls]
-  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end\n"
+  pbody = "begin\n" ++ concat [ppStmt 1 stmt | stmt <- stmts] ++ "end"
 
+-- | pretty print the parameters
 ppParams :: [Param] -> String
 ppParams [] = []
 ppParams (x:[]) = pptype ++ " " ++ pdtype where
@@ -36,6 +47,7 @@ ppParams (x:xs) = pptype ++ " " ++ pdtype ++ ", " ++ ppParams xs where
                Ref -> "ref"
   pdtype = ppDataType datatype id
 
+-- | pretty print the declaration
 ppDecl :: Decl -> String
 ppDecl decl = (ppDataType datatype id) ++ ";" where
   Decl id datatype = decl
@@ -47,6 +59,7 @@ ppBaseType basetype id = typename ++ id where
                   IntType -> "int "
                   FloatType -> "float "
 
+-- | pretty print the array type, like "[1, 2]"
 ppArrayType ::  ArrayType -> Ident -> String
 ppArrayType arrtype id = pbasetype ++ "[" ++ pshape ++ "]" where
   ArrayType basetype shape = arrtype
@@ -54,13 +67,15 @@ ppArrayType arrtype id = pbasetype ++ "[" ++ pshape ++ "]" where
   pshape = case shape of
                 ArrayShape m -> show m
                 MatrixShape m n -> (show m) ++ ", " ++ (show n)
-                           
+
+-- | pretty print the data type
 ppDataType :: DataType -> Ident -> String
 ppDataType datatype id = case datatype of
                               DTBaseType basetype -> ppBaseType basetype id
                               DTArrayType arraytype -> ppArrayType arraytype id
 
-
+-- | pretty print the statement and add enough indentations at the beginning
+--   of every statement
 ppStmt :: Int -> Stmt -> String
 ppStmt ind stmt = prefix ++ pstmt where
   prefix = concat $ take ind (repeat indent)
@@ -74,7 +89,8 @@ ppStmt ind stmt = prefix ++ pstmt where
                  "if " ++ ppTopLevelExpr expr ++ " then\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts1] ++ prefix ++ "else\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts2] ++ prefix ++ "fi\n"
                While expr stmts -> "while " ++ ppTopLevelExpr expr ++ " do\n" ++ concat [ppStmt (ind + 1) stmt | stmt <- stmts] ++ prefix ++ "od\n"
 
--- the top level expression do not need a bracket               
+-- | pretty print the top level expression. 
+--   the top level expression do not need a bracket.       
 ppTopLevelExpr :: Expr -> String
 ppTopLevelExpr expr = pexpr where
   pexpr = case expr of
@@ -99,7 +115,8 @@ ppTopLevelExpr expr = pexpr where
                UnaryMinus expr -> "-" ++ ppExpr expr
                Not expr -> "!" ++ ppExpr expr
 
-               
+-- | pretty print the expression.
+--   all of the expressions except the variables and constants will be wrapped in a parenthesis.               
 ppExpr :: Expr -> String
 ppExpr expr = pexpr where
   pexpr = case expr of
@@ -124,7 +141,7 @@ ppExpr expr = pexpr where
                UnaryMinus expr -> "-" ++ ppExpr expr
                Not expr -> "! " ++ ppExpr expr
 
-
+-- | pretty print the variables
 ppVariable :: Variable -> String
 ppVariable var = pvar where
   pvar = case var of
@@ -132,6 +149,7 @@ ppVariable var = pvar where
               Arr id expr -> id ++ "[" ++ (ppTopLevelExpr expr) ++ "]"
               Mat id expr1 expr2 -> id ++ "[" ++ (ppTopLevelExpr expr1) ++ ", " ++ (ppTopLevelExpr expr2) ++ "]"      
 
+-- | a helper function to concat given list with a string seperator.
 ppSeperate :: String -> [String] -> String
 ppSeperate sep [] = []
 ppSeperate sep (x:[]) = x

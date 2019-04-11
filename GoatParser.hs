@@ -1,3 +1,10 @@
+{-|
+Module      : GoatParser
+Description : A parser for Goat written using the Parsec parser combinator library.
+              It depends on GoatAST.hs.
+Author      : Chunyao Wang
+-}
+
 module GoatParser where
 
 import GoatAST
@@ -6,6 +13,11 @@ import Data.Char
 import Text.Parsec
 import Text.Parsec.Language (emptyDef)
 import qualified Text.Parsec.Token as Q
+
+-----------------------------------------------------------------
+--  Some definitions
+-----------------------------------------------------------------
+
 
 type Parser a
   = Parsec String Int a
@@ -63,7 +75,8 @@ pProg
       return (Program proc1 mainProc proc2)
 
 -----------------------------------------------------------------
---  pMainProc looks for the main procedure
+--  pMainProc looks for the main procedure, in Goat, only one
+--  main procedure is allowed.
 -----------------------------------------------------------------
 
 pMainProc :: Parser MainProc
@@ -102,14 +115,14 @@ pParam
       paramtype <- do {reserved "val"; return Val} <|> do {reserved "ref"; return Ref}
       basetype <- pBaseType
       ident <- identifier
-      datatype <- do
+      datatype <- do    -- check if the data type is an array
                     shape <- brackets pArrayShape
                     return (DTArrayType (ArrayType basetype shape))
                   <|>
                   return (DTBaseType basetype)
       whiteSpace
       return (Param paramtype datatype ident)
-    
+
 pBaseType :: Parser BaseType
 pBaseType
   = do { reserved "bool"; return BoolType }
@@ -118,7 +131,7 @@ pBaseType
     <|>
     do { reserved "float"; return FloatType }
 
-pArrayShape :: Parser ArrayShape  -- todo
+pArrayShape :: Parser ArrayShape   -- parse the array shape
 pArrayShape
   = do
       m <- natural
@@ -129,8 +142,6 @@ pArrayShape
           return (MatrixShape (fromInteger m :: Int) (fromInteger n :: Int))
         <|>
         return (ArrayShape (fromInteger m :: Int))
-      
-      
       
 -----------------------------------------------------------------
 --  pProgBody looks for a sequence of declarations followed by a
@@ -145,6 +156,10 @@ pProgBody
       stmts <- many1 pStmt
       reserved "end"
       return (decls,stmts)
+
+-----------------------------------------------------------------
+--  pDecl looks for a declaration line.
+-----------------------------------------------------------------
 
 pDecl :: Parser Decl
 pDecl
@@ -164,7 +179,7 @@ pDecl
       
 -----------------------------------------------------------------
 --  pStmt is the main parser for statements. It wants to recognise
---  read and write statements, and assignments.
+--  read , write, assign, call, if and while statements.
 -----------------------------------------------------------------
 
 pStmt, pRead, pWrite, pAsg, pCall, pIf, pWhile :: Parser Stmt
@@ -201,7 +216,7 @@ pIf
       exp <- pExp
       reserved "then"
       stmt1 <- many pStmt
-      do
+      do                  -- check the if statement structure
         reserved "else"
         stmt2 <- many pStmt
         reserved "fi"
@@ -229,10 +244,15 @@ pCall
 -----------------------------------------------------------------
 --  pExp is the main parser for expressions. It takes into account
 --  the operator precedences and the fact that the binary operators
---  are left-associative.
+--  are left-associative except the relational operators, which
+--  are non-associative.
+--
+--  pOr, pAnd, pNot ect., are expressions after or, and, not 
+--  operations
 -----------------------------------------------------------------
 
-pExp, pUminus, pConst, pVarExp, pString :: Parser Expr
+pExp, pOr, pAnd, pNot, pRelational, pAddMinus, pFactor, pUminus, pConst, pVarExp, pString :: Parser Expr
+pOrOp, pAndOp, pRelationalOp, pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
 
 pExp 
   = pString
@@ -249,9 +269,6 @@ pString
       return (StrConst str)
     <?>
     "string"
-
-pOrOp, pAndOp, pRelationalOp, pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
-pOr, pAnd, pNot, pRelational, pAddMinus, pFactor :: Parser Expr
 
 pOrOp
   = do
@@ -289,7 +306,7 @@ pNot
         return exp1
 
 
-pRelationalOp
+pRelationalOp   -- non-associative operators
   = do { reservedOp "="; return Equal }
     <|>
     do { reservedOp "!="; return NotEqual }
@@ -302,7 +319,8 @@ pRelationalOp
     <|>
     do { reservedOp ">"; return Greater }
     <?>
-    "operator"   --- maybe we should change err msg to "relational op"
+    "operator"   -- maybe we should change err msg to "relational op"
+                 -- but that will output different from the desired output
 
 pRelational
   = chainl1 pAddMinus pAddMinusOp
@@ -350,6 +368,12 @@ pVarExp
     <?>
     "identifier"
 
+
+-----------------------------------------------------------------
+--  pVar parse a variable, it can be just an identifier of a base
+--  type or an array type.
+-----------------------------------------------------------------
+
 pVar :: Parser Variable
 pVar
   = do
@@ -362,7 +386,7 @@ pVar
                                   return (Mat ident m n)
 
 
-pLvalue :: Parser Lvalue   ---todo
+pLvalue :: Parser Lvalue
 pLvalue
   = do
       var <- pVar
@@ -371,7 +395,7 @@ pLvalue
     "lvalue"
       
 -----------------------------------------------------------------
--- main
+--  main
 -----------------------------------------------------------------
 
 pMain :: Parser GoatProgram
@@ -381,6 +405,12 @@ pMain
       p <- pProg
       eof
       return p
+
+-----------------------------------------------------------------
+--  parseGoat receive a string representing the Goat program and 
+--  will either generate the abstract syntax tree or get parse 
+--  error.
+-----------------------------------------------------------------
 
 parseGoat :: String -> Either ParseError GoatProgram
 parseGoat = runParser pMain 0 ""

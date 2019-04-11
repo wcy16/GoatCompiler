@@ -1,3 +1,9 @@
+{-|
+Module      : GoatAST
+Description : Data structures to represent abstract syntax trees (ASTs) for Goat. 
+Author      : Chunyao Wang
+-}
+
 module GoatAST where
 
 type Ident = String
@@ -91,6 +97,7 @@ data MainProc
   = MainProc [Decl] [Stmt]
     deriving (Show, Eq)
 
+-- | Goat program data structure
 data GoatProgram
   = Program [Proc] MainProc [Proc]
     deriving (Show, Eq)
