@@ -237,7 +237,7 @@ pExp, pUminus, pConst, pVarExp, pString :: Parser Expr
 pExp 
   = pString
     <|>
-    (chainl1 pOr pOrOp)
+    chainl1 pOr pOrOp
     <?>
     "expression"
 
@@ -257,6 +257,8 @@ pOrOp
   = do
       reservedOp "||"
       return Or
+    <?>
+    "operator"
 
 pOr
   = chainl1 pAnd pAndOp
@@ -265,6 +267,8 @@ pAndOp
   = do
       reservedOp "&&"
       return And
+    <?>
+    "operator"
 
 pAnd
   = do
@@ -297,6 +301,8 @@ pRelationalOp
     do { reservedOp ">="; return GreaterEqual }
     <|>
     do { reservedOp ">"; return Greater }
+    <?>
+    "operator"   --- maybe we should change err msg to "relational op"
 
 pRelational
   = chainl1 pAddMinus pAddMinusOp
@@ -306,6 +312,8 @@ pAddMinusOp
   = do { reservedOp "+"; return Add }
     <|>
     do { reservedOp "-"; return Minus }
+    <?>
+    "operator"
 
 pAddMinus
  = chainl1 pFactor pMulDivOp
@@ -314,6 +322,8 @@ pMulDivOp
   = do { reservedOp "*"; return Mul }
     <|>
     do { reservedOp "/"; return Div }
+    <?>
+    "operator"
 
 pFactor
  = choice [pUminus, parens pExp, pConst, pVarExp]
