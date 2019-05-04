@@ -37,8 +37,8 @@ lexer
 
 whiteSpace = Q.whiteSpace lexer
 lexeme     = Q.lexeme lexer
-natural    = Q.natural lexer
-float      = Q.float lexer
+-- natural    = Q.natural lexer
+-- float      = Q.float lexer
 identifier = Q.identifier lexer
 colon      = Q.colon lexer
 semi       = Q.semi lexer
@@ -48,6 +48,7 @@ squares    = Q.squares lexer
 reserved   = Q.reserved lexer
 reservedOp = Q.reservedOp lexer
 brackets   = Q.brackets lexer
+naturalOrFloat = Q.naturalOrFloat lexer
 
 myReserved, myOpnames :: [String]
 
@@ -353,9 +354,11 @@ pUminus
       return (UnaryMinus exp)
 
 pConst
-  = do { n <- natural; return (IntConst (fromInteger n :: Int)) }
-    <|>
-    do { d <- float; return (FloatConst (realToFrac d)) }
+  = 
+    do { d <- naturalOrFloat;
+         case d of 
+          Left n -> return (IntConst (fromInteger n :: Int))
+          Right n -> return (FloatConst (realToFrac n))}
     <|>
     do { reserved "true"; return (BoolConst True) }
     <|>
