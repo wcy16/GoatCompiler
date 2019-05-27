@@ -31,6 +31,9 @@ generateSymbolTable slot (param:params) decls = symbol : (generateSymbolTable (s
 getReg :: Int -> String
 getReg registerNo = "r" ++ (show registerNo)
 
+getLabel :: Int -> String
+getLabel label = "label_" ++ (show label)
+
 getStackDepth :: Table -> Int
 getStackDepth table = Map.size table
 
@@ -47,13 +50,27 @@ generateProcCode name params decls stmts = header <++> pcodes where
   depth = getStackDepth table
   pushStack = "push_stack_frame " ++ (show depth) ++ "\n"
   header = Right $ name ++ ":\n" ++ pushStack
-  codes = map (generateStmtCode table) stmts
-  pcodes = foldl (<++>) (Right "") codes
+  -- codes = map (generateStmtCode table) stmts
+  -- pcodes = foldl (<++>) (Right "") codes
+  -- pcodes = foldl (\(code1, counter) stmt -> do
+  --                                             (code2, nextCounter) <- generateStmtCode table counter stmt
+  --                                             (code1 <++> code2, nextCounter))
+  --                (Right "", 0)
+  --                stmts
+  (pcodes, _) = generateStmts table 0 stmts
 
-generateStmtCode :: Table -> Stmt -> Code
-generateStmtCode table stmt = code where
-  code = case stmt of
-    Assign lval expr -> code1 <++> code2 where
+generateStmts :: Table -> Int -> [Stmt] -> (Code, Int)
+generateStmts table counter stmts
+  = foldl (\(code1, counter) stmt -> do
+                  let (code2, nextCounter) = generateStmtCode table counter stmt
+                  (code1 <++> code2, nextCounter))
+          (Right "", counter)
+          stmts
+
+generateStmtCode :: Table -> Int -> Stmt -> (Code, Int)
+generateStmtCode table counter stmt = (code, newCter) where
+  (code, newCter) = case stmt of
+    Assign lval expr -> (code1 <++> code2, counter) where
                             Lvalue (Prim id) = lval
                             (code1, type1) = generateExprCode table 0 expr
                             (type2, slot) = table Map.! id
@@ -61,15 +78,79 @@ generateStmtCode table stmt = code where
                               | type1 == IntType && type2 == FloatType  = return $ intToReal 1 0 ++ "store " ++ (show slot) ++ "," ++  (getReg 1) ++ "\n"
                               | type1 == type2 = return $ "store " ++ (show slot) ++ "," ++ (getReg 0) ++ "\n"
                               | otherwise = Left "parameters not match"
-    -- string const is only used in write
-    Write (StrConst str) -> Right $ "string_const " ++ (getReg 0) ++ ",\"" ++ str ++ "\"\ncall_builtin print_string\n"
-    Write expr -> code1 <++> (Right $ "call_builtin " ++ builtin ++ "\n") where
-                            (code1, type1) = generateExprCode table 0 expr
-                            builtin = case type1 of 
-                                IntType -> "print_int"
-                                FloatType -> "print_real"
-                                BoolType -> "print_bool"
 
+    Read lval -> (code1, counter) where
+                    Lvalue (Prim id) = lval
+                    (type1, slot) = table Map.! id
+                    code1 = Right ("call_builtin read_" ++ type1Code ++ load) where
+                      type1Code = case type1 of
+                                    BoolType -> "bool"
+                                    IntType -> "int"
+                                    FloatType -> "real"
+                      load = "\nstore " ++ (show slot) ++ ",r0\n"
+
+    -- string const is only used in write
+    Write (StrConst str) -> (Right $ "string_const " ++ (getReg 0) ++ ",\"" ++ str ++ "\"\ncall_builtin print_string\n"
+                             , counter)
+    Write expr -> (code1 <++> (Right $ "call_builtin " ++ builtin ++ "\n"), counter) where
+                                (code1, type1) = generateExprCode table 0 expr
+                                builtin = case type1 of 
+                                    IntType -> "print_int"
+                                    FloatType -> "print_real"
+                                    BoolType -> "print_bool"
+                   
+    -- if then                                
+    If expr stmts -> (codeif, labels) where
+                        (code1, type1) = generateExprCode table 0 expr
+                        (codeif, labels) =  if type1 /= BoolType then (Left "Not a Boolean type in IF", 0)
+                                            else (code2, cter) where
+                                                    label = getLabel counter
+                                                    -- if
+                                                    code3 = Right $ "branch_on_false " ++ (getReg 0) ++ "," ++ label ++ "\n"
+                                                    -- if body
+                                                    (code4, cter) = generateStmts table (counter + 1) stmts
+                                                    code5 = Right $ label ++ ":\n"
+                                                    code2 = code1 <++> code3 <++> code4 <++> code5
+    
+    -- if else
+    IfElse expr stmts1 stmts2 -> (codeif, labels) where
+                                    (code1, type1) = generateExprCode table 0 expr
+                                    (codeif, labels) =  if type1 /= BoolType then (Left "Not a Boolean type in IF", 0)
+                                                        else (code2, cter2) where   
+                                                          labelElse = getLabel counter
+                                                          -- if
+                                                          code3 = Right $ "branch_on_false " ++ (getReg 0) ++ "," ++ labelElse ++ "\n"
+                                                          -- then
+                                                          (code4, cter) = generateStmts table (counter + 1) stmts1
+                                                          labelFi = getLabel cter
+                                                          code5 = Right $ "branch_uncond " ++ labelFi ++ "\n"
+                                                          -- else
+                                                          code6 = Right $ labelElse ++ ":\n"
+                                                          (code7, cter2) = generateStmts table (cter + 1) stmts2
+                                                          code8 = Right $ labelFi ++ ":\n"
+                                                          -- code
+                                                          code2 = code1 <++> code3 <++> code4 <++> code5 <++> code6 <++> code7 <++> code8
+
+    -- while
+    While expr stmts -> (codewhile, labels) where
+                            (code1, type1) = generateExprCode table 0 expr
+                            (codewhile, labels) = if type1 /= BoolType then (Left "Not a Boolean type in WHILE", 0)
+                                                  else (code2, cter) where  
+                                                    labelWhile = getLabel counter
+                                                    -- jump to condition
+                                                    code3 = Right $ "branch_uncond " ++ labelWhile ++ "\n"
+                                                    -- label loop body
+                                                    labelBody = getLabel $ counter + 1
+                                                    code4 = Right $ labelBody ++ ":\n"
+                                                    (code5, cter) = generateStmts table (counter + 2) stmts     
+                                                    -- condition
+                                                    code6 = Right $ labelWhile ++ ":\n"
+                                                    -- code1
+                                                    code7 = Right $ "branch_on_true " ++ (getReg 0) ++ "," ++ labelBody ++ "\n"        
+                                                    -- code
+                                                    code2 = code3 <++> code4 <++> code5 <++> code6 <++> code1 <++> code7                             
+                                          
+                          
 generateExprCode :: Table -> Int -> Expr -> (Code, BaseType)
 generateExprCode table reg expr = case expr of
   -- const
