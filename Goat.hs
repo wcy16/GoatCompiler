@@ -11,6 +11,7 @@ module Main where
 import GoatAST
 import GoatParser
 import GoatPrettyPrinter
+import CodeGenerate
 import System.Environment
 import System.Exit
 
@@ -26,8 +27,15 @@ main
       task <- checkArgs progname args
       if task == Compile then
         do
-          putStrLn "Sorry, cannot generate code yet"
-          exitWith ExitSuccess
+          let [_, filename] = args
+          input <- readFile filename
+          let ast = parseGoat input
+          case ast of
+            Right tree -> putStrLn (generateOzCode tree)
+            Left err -> do { putStr "Parse error at "
+                            ; print err
+                            ; exitWith (ExitFailure 2)
+                            }
       else
         if task == Parse then
           do
@@ -63,6 +71,8 @@ checkArgs _ ["-p", filename]
   = return Pprint
 checkArgs _ ["-a", filename]
   = return Parse
+checkArgs _ ["-c", filename]
+  = return Compile
 checkArgs progname _
   = do
       putStrLn ("Usage: " ++ progname ++ " [-p] filename")

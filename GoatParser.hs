@@ -37,7 +37,7 @@ lexer
 
 whiteSpace = Q.whiteSpace lexer
 lexeme     = Q.lexeme lexer
--- natural    = Q.natural lexer
+natural    = Q.natural lexer
 -- float      = Q.float lexer
 identifier = Q.identifier lexer
 colon      = Q.colon lexer
