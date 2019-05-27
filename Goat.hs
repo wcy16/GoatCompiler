@@ -31,7 +31,12 @@ main
           input <- readFile filename
           let ast = parseGoat input
           case ast of
-            Right tree -> putStrLn (generateOzCode tree)
+            Right tree -> case generateOzCode tree of
+                                Right code -> putStrLn (code)
+                                Left err -> do { putStr "Symantic error "
+                                                ; print err
+                                                ; exitWith (ExitFailure 3)
+                                                }
             Left err -> do { putStr "Parse error at "
                             ; print err
                             ; exitWith (ExitFailure 2)
