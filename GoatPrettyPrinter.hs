@@ -39,13 +39,13 @@ ppParams (x:[]) = pptype ++ " " ++ pdtype where
   pptype = case paramtype of
                Val -> "val"
                Ref -> "ref"
-  pdtype = ppDataType datatype id
+  pdtype = ppBaseType datatype id
 ppParams (x:xs) = pptype ++ " " ++ pdtype ++ ", " ++ ppParams xs where
   Param paramtype datatype id = x
   pptype = case paramtype of
                Val -> "val"
                Ref -> "ref"
-  pdtype = ppDataType datatype id
+  pdtype = ppBaseType datatype id
 
 -- | pretty print the declaration
 ppDecl :: Decl -> String

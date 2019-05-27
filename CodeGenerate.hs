@@ -24,8 +24,7 @@ generateSymbolTable slot [] (decl:decls) = symbol : (generateSymbolTable (slot +
   DTBaseType btype = dtype   -- todo arrays
   symbol = (ident, (btype, slot))
 generateSymbolTable slot (param:params) decls = symbol : (generateSymbolTable (slot + 1) params decls) where
-  Param _ dtype ident = param
-  DTBaseType btype = dtype   -- todo arrays
+  Param _ btype ident = param
   symbol = (ident, (btype, slot))
 
 getReg :: Int -> String

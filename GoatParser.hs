@@ -116,13 +116,8 @@ pParam
       paramtype <- do {reserved "val"; return Val} <|> do {reserved "ref"; return Ref}
       basetype <- pBaseType
       ident <- identifier
-      datatype <- do    -- check if the data type is an array
-                    shape <- brackets pArrayShape
-                    return (DTArrayType (ArrayType basetype shape))
-                  <|>
-                  return (DTBaseType basetype)
       whiteSpace
-      return (Param paramtype datatype ident)
+      return (Param paramtype basetype ident)
 
 pBaseType :: Parser BaseType
 pBaseType

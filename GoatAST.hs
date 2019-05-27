@@ -86,7 +86,7 @@ data ParamType
     deriving (Show, Eq)
 
 data Param
-  = Param ParamType DataType Ident
+  = Param ParamType BaseType Ident
     deriving (Show, Eq)
 
 data Proc
