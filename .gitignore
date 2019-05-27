@@ -1,0 +1,17 @@
+*.txt
+# ignore goat source code
+*.gt
+# ignore ghc generated code
+*.hi
+*.o
+*.exe
+# ignore alex code
+*.x
+# ignore unused .hs files because we do not use that
+GoatLexer.hs
+KidAST.hs
+KidParser.hs
+# ignore oz code
+*.oz
+# ignore vscode folder
+.vscode/
