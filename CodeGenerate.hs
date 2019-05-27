@@ -7,11 +7,18 @@ import Data.List
 type Symbol = (String, (BaseType, Int))
 
 type Table = Map.Map String (BaseType, Int)
+type Env = Map.Map String [Param]
 
 type Code = Either String String
 
 (<++>) :: Code -> Code -> Code
 (<++>) code1 code2 = (++) <$> code1 <*> code2
+
+environment :: GoatProgram -> Env
+environment program = env where
+  Program proc1s mainProc proc2s = program
+  env = Map.fromList([(func_name, params) | Proc func_name params _ _ <- (proc1s ++ proc2s)])
+
 
 symbolTable :: [Param] -> [Decl] -> Table
 symbolTable params decls = table where
@@ -23,9 +30,11 @@ generateSymbolTable slot [] (decl:decls) = symbol : (generateSymbolTable (slot +
   Decl ident dtype = decl
   DTBaseType btype = dtype   -- todo arrays
   symbol = (ident, (btype, slot))
-generateSymbolTable slot (param:params) decls = symbol : (generateSymbolTable (slot + 1) params decls) where
-  Param _ btype ident = param
-  symbol = (ident, (btype, slot))
+generateSymbolTable slot (param:params) decls = symbols where
+  Param ptype btype ident = param
+  symbols = if ptype == Val then (ident, (btype, slot)) : (generateSymbolTable (slot + 1) params decls)
+            else -- & is not a valid var id, prefix varid with a & means it is a reference
+             ('&' : ident, (btype, slot)) : (ident, (btype, slot + 1)) : (generateSymbolTable (slot + 2) params decls)
 
 getReg :: Int -> String
 getReg registerNo = "r" ++ (show registerNo)
@@ -38,17 +47,50 @@ getStackDepth table = Map.size table
 
 generateOzCode :: GoatProgram -> Code
 generateOzCode goat = oz where
-  Program _ mainProc _ = goat   -- todo parse other procedures
+  env = environment goat
+  Program proc1s mainProc proc2s = goat   -- todo parse other procedures
   MainProc decls stmts = mainProc
-  oz = (Right "call proc_main\n") <++> (generateProcCode "proc_main" [] decls stmts) <++> (Right "halt\n")
+  mainCode = generateProcCode env "proc_main" [] decls stmts
+  procCode = foldl (<++>) mainCode [generateProcCode env id params decls stmts | Proc id params decls stmts <- proc1s ++ proc2s]
+  oz = (Right "call proc_main\nhalt\n") <++> procCode
+  -- oz = (Right "call proc_main\n") <++> (generateProcCode "proc_main" [] decls stmts) <++> (Right "halt\n")
 
+storeParam :: Table -> Int -> Int -> Param -> Code
+storeParam table depth regNo param = code where
+              Param ptype btype id = param
+              (_, slot) = table Map.! id
+              code = (if ptype == Val then
+                        Right $ "store " ++ (show slot) ++ "," ++ (getReg regNo) ++ "\n"
+                      else do
+                            let (_, addr) = table Map.! ('&' : id)
+                            let code2 = "load_indirect " ++ (getReg depth) ++ "," ++ (getReg regNo) ++ "\n"
+                            let code3 = "store " ++ (show slot) ++ "," ++ (getReg depth) ++ "\n"
+                            let code4 = "store " ++ (show addr) ++ "," ++ (getReg regNo) ++ "\n"
+                            return (code2 ++ code3 ++ code4)
+                      )
 
-generateProcCode :: String -> [Param] -> [Decl] -> [Stmt] -> Code
-generateProcCode name params decls stmts = header <++> pcodes where
+returnReference :: Table -> Param -> Code
+returnReference table param = Right code where
+  Param ptype dtype id = param
+  (_, slot) = table Map.! id
+  (_, addr) = table Map.! ('&' : id)
+  -- load value
+  code1 = "load " ++ (getReg 0) ++ "," ++ (show slot) ++ "\n"
+  -- load addr
+  code2 = "load " ++ (getReg 1) ++ "," ++ (show addr) ++ "\n"
+  -- store val
+  code3 = "store_indirect " ++ (getReg 1) ++ "," ++ (getReg 0) ++ "\n"
+  code = code1 ++ code2 ++ code3
+
+generateProcCode :: Env -> String -> [Param] -> [Decl] -> [Stmt] -> Code
+generateProcCode env name params decls stmts = header <++> stores <++> pcodes <++> returns where
   table = symbolTable params decls
   depth = getStackDepth table
   pushStack = "push_stack_frame " ++ (show depth) ++ "\n"
+  popStack = "pop_stack_frame " ++ (show depth) ++ "\n"
   header = Right $ name ++ ":\n" ++ pushStack
+  -- store params to stack
+  stores = foldl (<++>) (Right "") $ zipWith (storeParam table depth) [0..depth] params
   -- codes = map (generateStmtCode table) stmts
   -- pcodes = foldl (<++>) (Right "") codes
   -- pcodes = foldl (\(code1, counter) stmt -> do
@@ -56,18 +98,22 @@ generateProcCode name params decls stmts = header <++> pcodes where
   --                                             (code1 <++> code2, nextCounter))
   --                (Right "", 0)
   --                stmts
-  (pcodes, _) = generateStmts table 0 stmts
+  -- procedure body
+  (pcodes, _) = generateStmts env table 0 stmts
+  -- after execute procedure we need to return
+  returns = foldr (<++>) (Right (popStack ++ "return\n")) $ map (returnReference table) $ filter (\(Param ptype _ _) -> ptype == Ref ) params
 
-generateStmts :: Table -> Int -> [Stmt] -> (Code, Int)
-generateStmts table counter stmts
+
+generateStmts :: Env -> Table -> Int -> [Stmt] -> (Code, Int)
+generateStmts env table counter stmts
   = foldl (\(code1, counter) stmt -> do
-                  let (code2, nextCounter) = generateStmtCode table counter stmt
+                  let (code2, nextCounter) = generateStmtCode env table counter stmt
                   (code1 <++> code2, nextCounter))
           (Right "", counter)
           stmts
 
-generateStmtCode :: Table -> Int -> Stmt -> (Code, Int)
-generateStmtCode table counter stmt = (code, newCter) where
+generateStmtCode :: Env -> Table -> Int -> Stmt -> (Code, Int)
+generateStmtCode env table counter stmt = (code, newCter) where
   (code, newCter) = case stmt of
     Assign lval expr -> (code1 <++> code2, counter) where
                             Lvalue (Prim id) = lval
@@ -107,7 +153,7 @@ generateStmtCode table counter stmt = (code, newCter) where
                                                     -- if
                                                     code3 = Right $ "branch_on_false " ++ (getReg 0) ++ "," ++ label ++ "\n"
                                                     -- if body
-                                                    (code4, cter) = generateStmts table (counter + 1) stmts
+                                                    (code4, cter) = generateStmts env table (counter + 1) stmts
                                                     code5 = Right $ label ++ ":\n"
                                                     code2 = code1 <++> code3 <++> code4 <++> code5
     
@@ -120,12 +166,12 @@ generateStmtCode table counter stmt = (code, newCter) where
                                                           -- if
                                                           code3 = Right $ "branch_on_false " ++ (getReg 0) ++ "," ++ labelElse ++ "\n"
                                                           -- then
-                                                          (code4, cter) = generateStmts table (counter + 1) stmts1
+                                                          (code4, cter) = generateStmts env table (counter + 1) stmts1
                                                           labelFi = getLabel cter
                                                           code5 = Right $ "branch_uncond " ++ labelFi ++ "\n"
                                                           -- else
                                                           code6 = Right $ labelElse ++ ":\n"
-                                                          (code7, cter2) = generateStmts table (cter + 1) stmts2
+                                                          (code7, cter2) = generateStmts env table (cter + 1) stmts2
                                                           code8 = Right $ labelFi ++ ":\n"
                                                           -- code
                                                           code2 = code1 <++> code3 <++> code4 <++> code5 <++> code6 <++> code7 <++> code8
@@ -141,13 +187,53 @@ generateStmtCode table counter stmt = (code, newCter) where
                                                     -- label loop body
                                                     labelBody = getLabel $ counter + 1
                                                     code4 = Right $ labelBody ++ ":\n"
-                                                    (code5, cter) = generateStmts table (counter + 2) stmts     
+                                                    (code5, cter) = generateStmts env table (counter + 2) stmts     
                                                     -- condition
                                                     code6 = Right $ labelWhile ++ ":\n"
                                                     -- code1
                                                     code7 = Right $ "branch_on_true " ++ (getReg 0) ++ "," ++ labelBody ++ "\n"        
                                                     -- code
-                                                    code2 = code3 <++> code4 <++> code5 <++> code6 <++> code1 <++> code7                             
+                                                    code2 = code3 <++> code4 <++> code5 <++> code6 <++> code1 <++> code7
+                                                    
+    -- call func
+    Call funcid exprs -> (codeCall, counter) where
+                          codeCall = do
+                                      let exprCnt = length(exprs)
+                                      let params = env Map.! funcid
+                                      if exprCnt /= length(params) then
+                                        return "Not correct parameters count"
+                                      else do
+                                            -- store exprs into reg
+                                            let codes = zipWith3 (generateParamCode table) [0..exprCnt] exprs params
+                                            foldr (<++>) (return ("call " ++ funcid ++ "\n")) codes
+                                            -- -- type check
+                                            -- let typeCheck = foldl (&&) True $ zipWith (\(Param _ btype1 _) (_, btype2) -> btype1 == btype2) params prep
+                                            -- if not typeCheck then
+                                            --   Left "parameter type check fail"
+                                            -- else
+                                            --   foldr (<++>) (return ("call " ++ funcid ++ "\n")) [ code | (code, _) <- prep]
+
+
+generateParamCode :: Table -> Int -> Expr -> Param -> Code
+generateParamCode table reg expr param = code where
+  Param ptype btype id = param
+  code = if ptype == Val then 
+          do
+            let (exprCode, exprType) = generateExprCode table reg expr
+            if exprType /= btype then
+              Left "parameter type check fail"
+            else
+              exprCode
+         else case expr of
+                Var (Prim id) -> do
+                                  let (vartype, slot) = table Map.! id
+                                  if vartype /= btype then   -- parameter not match
+                                    Left "parameter type check fail"
+                                  else
+                                    Right $ "load_address " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"
+                _ -> Left "cannot parse reference type"
+                
+
                                           
                           
 generateExprCode :: Table -> Int -> Expr -> (Code, BaseType)
@@ -186,7 +272,7 @@ generateExprCode table reg expr = case expr of
   Not expr -> (code, BoolType) where (code1, type1) = generateExprCode table (reg + 1) expr
                                      code = if type1 == BoolType
                                              then code1 <++> Right ("not " ++ (getReg reg) ++ "," ++ (getReg (reg + 1)) ++ "\n")
-                                             else Left "cannot apply NOT op to non-boolean type!"
+                                             else Left "cannot apply NOT op to non-boolean type!"                                         
 
   Bracket expr1 -> generateExprCode table reg expr1
 
