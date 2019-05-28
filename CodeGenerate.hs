@@ -117,25 +117,64 @@ returnReference table param = Right code where
   code3 = "store_indirect " ++ (getReg 1) ++ "," ++ (getReg 0) ++ "\n"
   code = code1 ++ code2 ++ code3
 
+-----------------------------------------------------------------------------
+
 -- | helper function to initialize matrix
-initMatrixN :: Table -> Int -> Int -> Int -> Int -> Code
-initMatrixN table slot x y n = code where  -- n = 0..x-1
-  code1 = "load_address " ++ (getReg 0) ++ "," ++ (show $ slot + x + n * y) ++ "\n"
-  code2 = "store " ++ (show $ slot + n) ++ "," ++ (getReg 0) ++ "\n"
-  code = Right $ code1 ++ code2
+--   we use reg2 because reg0 and reg1 is stored
+initMatrixN :: Table -> BaseType -> Int -> Int -> Int -> Int -> Code
+initMatrixN table btype slot x y n = code where  -- n = 0..x-1
+  -- address of matrix[n][0]
+  code1 = Right $ "load_address " ++ (getReg 2) ++ "," ++ (show $ slot + x + n * y) ++ "\n"
+  -- init matrix[n][0..y]
+  code2 = initArr table btype (slot + x + n * y) y 0
+  -- init matrix header
+  code3 = Right $ "store " ++ (show $ slot + n) ++ "," ++ (getReg 2) ++ "\n"
+  -- combine
+  code = code1 <++> code2 <++> code3
 
 -- | we initialize matrix(x, y) to make the first x frames store the correct address
 initMatrix :: Table -> String -> Int -> Int -> Code
 initMatrix table id x y = code where
+  (btype, slot) = table Map.! id
+  code = foldl (<++>) (Right "") [initMatrixN table btype slot x y n | n <- [0..(x-1)]]
+
+-- | initialize declarations to default value
+--   reg0 int/bool 0
+--   reg1 float 0.0
+initDecl :: Table -> Decl -> Code
+initDecl table decl = code where
+  Decl id dtype = decl
   (_, slot) = table Map.! id
-  code = foldl (<++>) (Right "") [initMatrixN table slot x y n | n <- [0..(x-1)]]
+  code = case dtype of
+    DTBaseType btype -> do
+                          let code = if btype == FloatType then
+                                        "store " ++ (show slot) ++ "," ++ (getReg 1) ++ "\n"
+                                      else
+                                        "store " ++ (show slot) ++ "," ++ (getReg 0) ++ "\n"
+                          return code
+    DTArrayType (ArrayType btype shape) -> case shape of
+                                                  ArrayShape x -> initArr table btype slot x 0
+                                                  MatrixShape x y -> initMatrix table id x y
+
+-- | initialize arrays
+initArr :: Table -> BaseType -> Int -> Int -> Int -> Code
+initArr table btype slot x n = code where
+  code1
+    | btype == BoolType || btype == IntType = "store " ++ (show $ slot + n) ++ "," ++ (getReg 0) ++ "\n"
+    | otherwise = "store " ++ (show $ slot + n) ++ "," ++ (getReg 1) ++ "\n"
+  code = if x == n + 1 then
+          Right code1
+         else
+          (Right code1) <++> (initArr table btype slot x (n + 1))
+
+
 
 -- | generate procedure code
 --   A procedure contain following part:
 --      1. label
 --      2. push stack frame
 --      3. store parameters to stack
---      4. initialize matrices
+--      4. initialize vars, arrays and matrices
 --      5. procedure body
 --      6. store reference values
 --      7. pop stack frame and return
@@ -147,8 +186,12 @@ generateProcCode env name params decls stmts = header <++> stores <++> inits <++
   header = Right $ name ++ ":\n" ++ pushStack
   -- store params to stack
   stores = foldl (<++>) (Right "") $ zipWith (storeParam table depth) [0..depth] params
-  -- init matrix decls
-  inits = foldl (<++>) (Right "") [initMatrix table id x y | Decl id (DTArrayType (ArrayType btype (MatrixShape x y))) <- decls]
+  -- init decls
+  initIntRegs = "int_const " ++ (getReg 0) ++ ",0\n"
+  initRealRegs = "real_const " ++ (getReg 1) ++ ",0.0\n"
+  inits = foldl (<++>) (Right $ initIntRegs ++ initRealRegs) $ map (initDecl table) decls
+  -- -- init matrix decls
+  -- inits = foldl (<++>) (Right "") [initMatrix table id x y | Decl id (DTArrayType (ArrayType btype (MatrixShape x y))) <- decls]
   -- procedure body
   (pcodes, _) = generateStmts name env table 0 stmts
   -- after execute procedure we need to return
@@ -315,6 +358,7 @@ generateExprCode table reg expr = case expr of
                     IntType)
   FloatConst const -> (Right ("real_const " ++ (getReg reg) ++ "," ++ (show const) ++ "\n"),
                     FloatType)
+  BoolConst const -> (Right ("int_const " ++ (getReg reg) ++ "," ++ (show $ boolToInt const) ++ "\n"), BoolType)
   -- StrConst const -> ("string_const " ++ (getReg reg) ++ "," ++ const ++ "\n",
   --                   StringType)
   ---- string const is not needed because string is only used in write
@@ -367,6 +411,11 @@ generateExprCode table reg expr = case expr of
 -- | helper function to generate int_to_real code
 intToReal :: Int -> Int -> String
 intToReal reg1 reg2 = "int_to_real " ++ (getReg reg1) ++ "," ++ (getReg reg2) ++ "\n"
+
+-- | helper function to generate int value for bool type
+boolToInt :: Bool -> Int
+boolToInt True = 1
+boolToInt False = 0
 
 -- | helper function to generate binary operation code
 binaryOpCode :: Table -> String -> Int -> Expr -> Expr -> (Code, BaseType)
