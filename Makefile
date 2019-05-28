@@ -1,4 +1,4 @@
-Goat: GoatAST.hs GoatParser.hs GoatPrettyPrinter.hs Goat.hs
+Goat: CodeGenerate.hs GoatAST.hs GoatParser.hs GoatPrettyPrinter.hs Goat.hs
 	ghc Goat.hs -o Goat
 
 clean:

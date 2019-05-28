@@ -15,3 +15,5 @@ KidParser.hs
 *.oz
 # ignore vscode folder
 .vscode/
+# ignore test folder
+test/

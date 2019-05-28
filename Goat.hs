@@ -27,7 +27,7 @@ main
       task <- checkArgs progname args
       if task == Compile then
         do
-          let [_, filename] = args
+          let filename = last args
           input <- readFile filename
           let ast = parseGoat input
           case ast of

@@ -1,6 +1,6 @@
 {-|
-Module      : GoatAST
-Description : Data structures to represent abstract syntax trees (ASTs) for Goat. 
+Module      : CodeGenerate
+Description : Generate codes for Oz 
 Author      : Chunyao Wang
 -}
 
