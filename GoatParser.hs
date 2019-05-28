@@ -262,6 +262,7 @@ pString
       char '"'
       str <- many (satisfy (/= '"'))
       char '"'
+      whiteSpace
       return (StrConst str)
     <?>
     "string"

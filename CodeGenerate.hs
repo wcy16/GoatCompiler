@@ -44,20 +44,33 @@ symbolTable params decls = (table, depth) where
     table = Map.fromList(init tableWithEnd)
 
 -- | generate symbol table.
+--   if a variable is an array:
+--    for an array of length x, we store x frames in stack. The array id is prepended with a '+'.
+--    we also store an entry with the array name but the slot is set -1 to show that this id is taken
 --   if a varable is a matrix:
 --    we treat matrix an array of array, so a matrix of shape (x, y) takes (x * y + x) frames
---    the first x frame store addresses for the rest x arrays of length y
+--    the first x frame store addresses for the rest x arrays of length y.
+--    The matrix is prepended with a '-'. we also store an entry with the array name but the slot is set -1 to show that this id is taken
 --   if a variable is a reference:
 --    we store 2 symbols for that variable, the first one is the address of that variable,
 --    the second one is the value of that variable. The address's id is prepended with a '&'
 --    since the '&' char is not a valid identifier.
 generateSymbolTable :: Int -> [Param] -> [Decl] -> [Symbol]
 generateSymbolTable slot [] [] = [("end", (BoolType, slot))]
-generateSymbolTable slot [] (decl:decls) = symbol : (generateSymbolTable nextSlot [] decls) where  --for decls
-  Decl ident dtype = decl
-  (symbol, nextSlot) = case dtype of
-    DTBaseType btype -> ((ident, (btype, slot)), slot + 1)   -- base type
-    DTArrayType (ArrayType btype shape) -> ((ident, (btype, slot)), slot + getArrayOffset shape)  -- array type
+-- generateSymbolTable slot [] (decl:decls) = symbol ++ (generateSymbolTable nextSlot [] decls) where  --for decls
+--   Decl ident dtype = decl
+--   (symbol, nextSlot) = case dtype of
+--     DTBaseType btype -> [((ident, (btype, slot)), slot + 1)]   -- base type
+--     DTArrayType (ArrayType btype (ArrayShape x)) -> [(('+' : ident, (btype, slot)), slot + x), ((ident, (btype, -1)), slot + x)] -- array type
+--     DTArrayType (ArrayType btype (MatrixShape x y)) -> [(('-' : ident, (btype, slot)), slot + x * y + x ), ((ident, (btype, -1)), slot + x * y + x )]  -- matrix type
+generateSymbolTable slot [] ((Decl ident dtype):decls)
+  = case dtype of
+      DTBaseType btype -> (ident, (btype, slot)) : (generateSymbolTable (slot + 1) [] decls)
+      DTArrayType (ArrayType btype (ArrayShape x)) 
+          -> (ident, (btype, -1)) : ('+' : ident, (btype, slot)) : (generateSymbolTable (slot + x) [] decls)
+      DTArrayType (ArrayType btype (MatrixShape x y)) 
+          -> (ident, (btype, -1)) : ('-' : ident, (btype, slot)) : (generateSymbolTable (slot + x * y + x) [] decls)
+
 generateSymbolTable slot (param:params) decls = symbols where   -- for params
   Param ptype btype ident = param
   symbols = if ptype == Val then (ident, (btype, slot)) : (generateSymbolTable (slot + 1) params decls)
@@ -75,7 +88,7 @@ getReg registerNo = "r" ++ (show registerNo)
 
 -- | helper function to get label name by giving label number
 getLabel :: String -> Int -> String
-getLabel funcid label = funcid ++ "_label_" ++ (show label)
+getLabel funcid label = "proc_" ++ funcid ++ "_label_" ++ (show label)
 
 -- | generate goat code by given a goat AST
 generateOzCode :: GoatProgram -> Code
@@ -83,7 +96,7 @@ generateOzCode goat = oz where
   env = environment goat
   Program proc1s mainProc proc2s = goat
   MainProc decls stmts = mainProc
-  mainCode = generateProcCode env "proc_main" [] decls stmts
+  mainCode = generateProcCode env "main" [] decls stmts
   procCode = foldl (<++>) mainCode [generateProcCode env id params decls stmts | Proc id params decls stmts <- proc1s ++ proc2s]
   oz = (Right "call proc_main\nhalt\n") <++> procCode
   -- oz = (Right "call proc_main\n") <++> (generateProcCode "proc_main" [] decls stmts) <++> (Right "halt\n")
@@ -97,8 +110,8 @@ storeParam table depth regNo param = code where
                         Right $ "store " ++ (show slot) ++ "," ++ (getReg regNo) ++ "\n"
                       else do
                             let (_, addr) = table Map.! ('&' : id)
-                            let code2 = "load_indirect " ++ (getReg depth) ++ "," ++ (getReg regNo) ++ "\n"
-                            let code3 = "store " ++ (show slot) ++ "," ++ (getReg depth) ++ "\n"
+                            let code2 = "load_indirect " ++ (getReg 1023) ++ "," ++ (getReg regNo) ++ "\n"
+                            let code3 = "store " ++ (show slot) ++ "," ++ (getReg 1023) ++ "\n"
                             let code4 = "store " ++ (show addr) ++ "," ++ (getReg regNo) ++ "\n"
                             return (code2 ++ code3 ++ code4)
                       )
@@ -135,7 +148,7 @@ initMatrixN table btype slot x y n = code where  -- n = 0..x-1
 -- | we initialize matrix(x, y) to make the first x frames store the correct address
 initMatrix :: Table -> String -> Int -> Int -> Code
 initMatrix table id x y = code where
-  (btype, slot) = table Map.! id
+  (btype, slot) = table Map.! ('-' : id)
   code = foldl (<++>) (Right "") [initMatrixN table btype slot x y n | n <- [0..(x-1)]]
 
 -- | initialize declarations to default value
@@ -144,17 +157,21 @@ initMatrix table id x y = code where
 initDecl :: Table -> Decl -> Code
 initDecl table decl = code where
   Decl id dtype = decl
-  (_, slot) = table Map.! id
   code = case dtype of
     DTBaseType btype -> do
+                          let (_, slot) = table Map.! id
                           let code = if btype == FloatType then
                                         "store " ++ (show slot) ++ "," ++ (getReg 1) ++ "\n"
                                       else
                                         "store " ++ (show slot) ++ "," ++ (getReg 0) ++ "\n"
                           return code
     DTArrayType (ArrayType btype shape) -> case shape of
-                                                  ArrayShape x -> initArr table btype slot x 0
-                                                  MatrixShape x y -> initMatrix table id x y
+                                                  ArrayShape x -> do
+                                                                    let (_, slot) = table Map.! ('+' : id)
+                                                                    initArr table btype slot x 0
+                                                  MatrixShape x y -> do
+                                                                        let (_, slot) = table Map.! ('-' : id)
+                                                                        initMatrix table id x y
 
 -- | initialize arrays
 initArr :: Table -> BaseType -> Int -> Int -> Int -> Code
@@ -183,7 +200,7 @@ generateProcCode env name params decls stmts = header <++> stores <++> inits <++
   (table, depth) = symbolTable params decls   -- generate symbol table
   pushStack = "push_stack_frame " ++ (show depth) ++ "\n"   -- the frames used
   popStack = "pop_stack_frame " ++ (show depth) ++ "\n"     -- after procedure finished, we pop the frames
-  header = Right $ name ++ ":\n" ++ pushStack
+  header = Right $ ("proc_" ++ name) ++ ":\n" ++ pushStack
   -- store params to stack
   stores = foldl (<++>) (Right "") $ zipWith (storeParam table depth) [0..depth] params
   -- init decls
@@ -215,6 +232,7 @@ generateStmtCode name env table counter stmt = (code, newCter) where
                             (code1, type1) = generateExprCode table 0 expr
                             (type2, slot) = table Map.! id
                             code2
+                              | slot == -1 = Left "not a variable"
                               | type1 == IntType && type2 == FloatType  = return $ intToReal 1 0 ++ "store " ++ (show slot) ++ "," ++  (getReg 1) ++ "\n"
                               | type1 == type2 = return $ "store " ++ (show slot) ++ "," ++ (getReg 0) ++ "\n"
                               | otherwise = Left "parameters not match"
@@ -240,15 +258,44 @@ generateStmtCode name env table counter stmt = (code, newCter) where
                         | otherwise = Left "parameters not match"
 
     -- read values  
-    Read lval -> (code1, counter) where
-                    Lvalue (Prim id) = lval
+    Read (Lvalue (Prim id)) -> (code1, counter) where
                     (type1, slot) = table Map.! id
-                    code1 = Right ("call_builtin read_" ++ type1Code ++ load) where
+                    code1 = if slot == -1 then Left "not a variable"
+                            else
+                              Right ("call_builtin read_" ++ type1Code ++ load) where
+                              type1Code = case type1 of
+                                            BoolType -> "bool"
+                                            IntType -> "int"
+                                            FloatType -> "real"
+                              load = "\nstore " ++ (show slot) ++ ",r0\n"
+    Read (Lvalue (Arr id expr1)) -> (code, counter) where
+                    (typeExpr, slot) = table Map.! ('+' : id)
+                    -- get arr addr
+                    (code1, type1) = getArrayAddr table 1 (Arr id expr1)
+                    -- read from keyboard
+                    code2 = Right ("call_builtin read_" ++ type1Code ++ "\n") where
                       type1Code = case type1 of
                                     BoolType -> "bool"
                                     IntType -> "int"
                                     FloatType -> "real"
-                      load = "\nstore " ++ (show slot) ++ ",r0\n"
+                    -- read reg0 to * reg1
+                    code3 = Right $ "store_indirect " ++ (getReg 1) ++ "," ++ (getReg 0) ++ "\n"
+                    code = code2 <++> code1 <++> code3
+                    
+
+    Read (Lvalue (Mat id expr1 expr2)) -> (code, counter) where
+                      (typeExpr, slot) = table Map.! ('-' : id)
+                      -- get arr addr
+                      (code1, type1) = getArrayAddr table 1 (Mat id expr1 expr2)
+                      -- read from keyboard
+                      code2 = Right ("call_builtin read_" ++ type1Code ++ "\n") where
+                        type1Code = case type1 of
+                                      BoolType -> "bool"
+                                      IntType -> "int"
+                                      FloatType -> "real"
+                      -- read reg0 to * reg1
+                      code3 = Right $ "store_indirect " ++ (getReg 1) ++ "," ++ (getReg 0) ++ "\n"
+                      code = code2 <++> code1 <++> code3
 
     -- string const is only used in write
     Write (StrConst str) -> (Right $ "string_const " ++ (getReg 0) ++ ",\"" ++ str ++ "\"\ncall_builtin print_string\n"
@@ -321,7 +368,7 @@ generateStmtCode name env table counter stmt = (code, newCter) where
                                       else do
                                             -- store exprs into reg
                                             let codes = zipWith3 (generateParamCode table) [0..exprCnt] exprs params
-                                            foldr (<++>) (return ("call " ++ funcid ++ "\n")) codes
+                                            foldr (<++>) (return ("call " ++ "proc_" ++ funcid ++ "\n")) codes
                                             -- -- type check
                                             -- let typeCheck = foldl (&&) True $ zipWith (\(Param _ btype1 _) (_, btype2) -> btype1 == btype2) params prep
                                             -- if not typeCheck then
@@ -337,16 +384,28 @@ generateParamCode table reg expr param = code where
           do
             let (exprCode, exprType) = generateExprCode table reg expr
             if exprType /= btype then
-              Left "parameter type check fail"
+              if btype == FloatType && exprType == IntType then
+                exprCode <++> (Right $ (intToReal (reg + 1) reg) ++ "move " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n")
+              else
+                Left "parameter type check fail"
             else
               exprCode
          else case expr of
                 Var (Prim id) -> do
                                   let (vartype, slot) = table Map.! id
-                                  if vartype /= btype then   -- parameter not match
-                                    Left "parameter type check fail"
+                                  if slot == -1 then
+                                    Left "not a variable"
                                   else
-                                    Right $ "load_address " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"
+                                    if vartype /= btype then   -- parameter not match
+                                      Left "parameter type check fail"
+                                    else
+                                      Right $ "load_address " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"
+                Var (Arr id expr1) -> do
+                                        let (arrCode, btype) = getArrayAddr table reg (Arr id expr1)
+                                        arrCode
+                Var (Mat id expr1 expr2) -> do
+                                              let (arrCode, btype) = getArrayAddr table reg (Mat id expr1 expr2)
+                                              arrCode
                 _ -> Left "cannot parse reference type"
                 
 -- | generate expression codes, the result is stored in a given register
@@ -364,8 +423,12 @@ generateExprCode table reg expr = case expr of
   ---- string const is not needed because string is only used in write
 
   -- variable
-  Var (Prim id) -> (Right("load " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"),
-                    btype) where (btype, slot) = table Map.! id
+  Var (Prim id) -> do
+                    let (btype, slot) = table Map.! id
+                    if slot == -1 then
+                      (Left "not a valid id", btype)
+                    else
+                      (Right("load " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"), btype)
   Var (Arr id expr1) -> (code, btype) where
                         (code1, btype) = getArrayAddr table (reg + 1) (Arr id expr1)
                         code2 = Right $ "load_indirect " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n"
@@ -382,8 +445,8 @@ generateExprCode table reg expr = case expr of
   Div expr1 expr2 -> binaryOpCode table "div" reg expr1 expr2
 
   -- binary logic ops
-  And expr1 expr2 -> binaryOpCode table "and" reg expr1 expr2
-  Or expr1 expr2 -> binaryOpCode table "or" reg expr1 expr2
+  And expr1 expr2 -> binaryLogicOpCode table "and" reg expr1 expr2
+  Or expr1 expr2 -> binaryLogicOpCode table "or" reg expr1 expr2
 
   -- binary compare ops
   Equal expr1 expr2 -> (code, BoolType) where (code, _) = binaryOpCode table "cmp_eq" reg expr1 expr2
@@ -437,6 +500,16 @@ binaryOpCode table instruction reg expr1 expr2 = (code1 <++> code2 <++> code3, t
     | type1 == IntType && type2 == IntType = (
             Right (instruction ++ "_int " ++ (getReg reg) ++ "," ++ (getReg (reg + 1)) ++ "," ++ (getReg (reg + 2)) ++ "\n")
             , IntType)
+    | type1 == BoolType && type2 == BoolType = (   -- boolean is treated as int
+            Right (instruction ++ "_int " ++ (getReg reg) ++ "," ++ (getReg (reg + 1)) ++ "," ++ (getReg (reg + 2)) ++ "\n")
+            , BoolType)
+    | otherwise = (Left "error binary op", type1)
+
+binaryLogicOpCode :: Table -> String -> Int -> Expr -> Expr -> (Code, BaseType)
+binaryLogicOpCode table instruction reg expr1 expr2 = (code1 <++> code2 <++> code3, type3) where
+  (code1, type1) = generateExprCode table (reg + 1) expr1
+  (code2, type2) = generateExprCode table (reg + 2) expr2
+  (code3, type3)
     | type1 == BoolType && type2 == BoolType = (   -- and / or
             Right (instruction ++ " " ++ (getReg reg) ++ "," ++ (getReg (reg + 1)) ++ "," ++ (getReg (reg + 2)) ++ "\n")
             , BoolType)
@@ -446,7 +519,7 @@ binaryOpCode table instruction reg expr1 expr2 = (code1 <++> code2 <++> code3, t
 getArrayAddr :: Table -> Int -> Variable -> (Code, BaseType)
 getArrayAddr table reg (Arr id expr1)   -- get address of an array value
   = (code, btype) where
-    (btype, slot) = table Map.! id
+    (btype, slot) = table Map.! ('+' : id)
     (code1, type1) = generateExprCode table (reg + 1) expr1
     code = if type1 /= IntType then
             Left "array position can only be int"
@@ -459,7 +532,7 @@ getArrayAddr table reg (Arr id expr1)   -- get address of an array value
                   code1 <++> Right (code2 ++ code3)
 getArrayAddr table reg (Mat id expr1 expr2)    -- get address of a matrix value
   = (code, btype) where
-    (btype, slot) = table Map.! id
+    (btype, slot) = table Map.! ('-' : id)
     (code1, type1) = generateExprCode table (reg + 1) expr1
     (code2, type2) = generateExprCode table (reg + 2) expr2
     code = if type1 /= IntType || type2 /= IntType then
