@@ -20,21 +20,29 @@ environment program = env where
   env = Map.fromList([(func_name, params) | Proc func_name params _ _ <- (proc1s ++ proc2s)])
 
 
-symbolTable :: [Param] -> [Decl] -> Table
-symbolTable params decls = table where
-    table = Map.fromList(generateSymbolTable 0 params decls)
+symbolTable :: [Param] -> [Decl] -> (Table, Int)
+symbolTable params decls = (table, depth) where
+    tableWithEnd = generateSymbolTable 0 params decls
+    (_, (_, depth)) = last tableWithEnd
+    table = Map.fromList(init tableWithEnd)
 
 generateSymbolTable :: Int -> [Param] -> [Decl] -> [Symbol]
-generateSymbolTable _ [] [] = []
-generateSymbolTable slot [] (decl:decls) = symbol : (generateSymbolTable (slot + 1) [] decls) where
+generateSymbolTable slot [] [] = [("end", (BoolType, slot))]
+generateSymbolTable slot [] (decl:decls) = symbol : (generateSymbolTable nextSlot [] decls) where
   Decl ident dtype = decl
-  DTBaseType btype = dtype   -- todo arrays
-  symbol = (ident, (btype, slot))
+  (symbol, nextSlot) = case dtype of
+    DTBaseType btype -> ((ident, (btype, slot)), slot + 1)
+    DTArrayType (ArrayType btype shape) -> ((ident, (btype, slot)), slot + getArrayOffset shape)
 generateSymbolTable slot (param:params) decls = symbols where
   Param ptype btype ident = param
   symbols = if ptype == Val then (ident, (btype, slot)) : (generateSymbolTable (slot + 1) params decls)
             else -- & is not a valid var id, prefix varid with a & means it is a reference
              ('&' : ident, (btype, slot)) : (ident, (btype, slot + 1)) : (generateSymbolTable (slot + 2) params decls)
+
+
+getArrayOffset :: ArrayShape -> Int
+getArrayOffset (ArrayShape x) = x
+getArrayOffset (MatrixShape x y) = x * y + x   -- matrix is array of array
 
 getReg :: Int -> String
 getReg registerNo = "r" ++ (show registerNo)
@@ -82,15 +90,29 @@ returnReference table param = Right code where
   code3 = "store_indirect " ++ (getReg 1) ++ "," ++ (getReg 0) ++ "\n"
   code = code1 ++ code2 ++ code3
 
+initMatrixN :: Table -> Int -> Int -> Int -> Int -> Code
+initMatrixN table slot x y n = code where  -- n = 0..x-1
+  code1 = "load_address " ++ (getReg 0) ++ "," ++ (show $ slot + x + n * y) ++ "\n"
+  code2 = "store " ++ (show $ slot + n) ++ "," ++ (getReg 0) ++ "\n"
+  code = Right $ code1 ++ code2
+
+initMatrix :: Table -> String -> Int -> Int -> Code
+initMatrix table id x y = code where
+  (_, slot) = table Map.! id
+  code = foldl (<++>) (Right "") [initMatrixN table slot x y n | n <- [0..(x-1)]]
+
 generateProcCode :: Env -> String -> [Param] -> [Decl] -> [Stmt] -> Code
-generateProcCode env name params decls stmts = header <++> stores <++> pcodes <++> returns where
-  table = symbolTable params decls
-  depth = getStackDepth table
+generateProcCode env name params decls stmts = header <++> stores <++> inits <++> pcodes <++> returns where
+  (table, depth) = symbolTable params decls
+  -- depth = getStackDepth table
   pushStack = "push_stack_frame " ++ (show depth) ++ "\n"
   popStack = "pop_stack_frame " ++ (show depth) ++ "\n"
   header = Right $ name ++ ":\n" ++ pushStack
   -- store params to stack
   stores = foldl (<++>) (Right "") $ zipWith (storeParam table depth) [0..depth] params
+  -- init matrix decls
+  inits = foldl (<++>) (Right "") [initMatrix table id x y | Decl id (DTArrayType (ArrayType btype (MatrixShape x y))) <- decls]
+
   -- codes = map (generateStmtCode table) stmts
   -- pcodes = foldl (<++>) (Right "") codes
   -- pcodes = foldl (\(code1, counter) stmt -> do
@@ -115,14 +137,33 @@ generateStmts env table counter stmts
 generateStmtCode :: Env -> Table -> Int -> Stmt -> (Code, Int)
 generateStmtCode env table counter stmt = (code, newCter) where
   (code, newCter) = case stmt of
-    Assign lval expr -> (code1 <++> code2, counter) where
-                            Lvalue (Prim id) = lval
+    Assign (Lvalue (Prim id)) expr -> (code1 <++> code2, counter) where
                             (code1, type1) = generateExprCode table 0 expr
                             (type2, slot) = table Map.! id
                             code2
                               | type1 == IntType && type2 == FloatType  = return $ intToReal 1 0 ++ "store " ++ (show slot) ++ "," ++  (getReg 1) ++ "\n"
                               | type1 == type2 = return $ "store " ++ (show slot) ++ "," ++ (getReg 0) ++ "\n"
                               | otherwise = Left "parameters not match"
+    
+    Assign (Lvalue (Arr id expr1)) expr2 -> (code1 <++> code2 <++> code3, counter) where
+                      -- find array addr in reg0
+                      (code1, type1) = getArrayAddr table 0 (Arr id expr1)
+                      -- calculate expr2 in reg1
+                      (code2, type2) = generateExprCode table 1 expr2
+                      code3
+                        | type1 == FloatType && type2 == IntType = return $ intToReal 2 1 ++ "store_indirect " ++ (getReg 0) ++ "," ++ (getReg 2) ++ "\n"
+                        | type1 == type2 = return $ "store_indirect " ++ (getReg 0) ++ "," ++ (getReg 1) ++ "\n"
+                        | otherwise = Left "parameters not match"
+    
+    Assign (Lvalue (Mat id expr1 expr2)) expr3 -> (code1 <++> code2 <++> code3, counter) where
+                      -- find array addr in reg0
+                      (code1, type1) = getArrayAddr table 0 (Mat id expr1 expr2)
+                      -- calculate expr2 in reg1
+                      (code2, type2) = generateExprCode table 1 expr3
+                      code3
+                        | type1 == FloatType && type2 == IntType = return $ intToReal 2 1 ++ "store_indirect " ++ (getReg 0) ++ "," ++ (getReg 2) ++ "\n"
+                        | type1 == type2 = return $ "store_indirect " ++ (getReg 0) ++ "," ++ (getReg 1) ++ "\n"
+                        | otherwise = Left "parameters not match"
 
     Read lval -> (code1, counter) where
                     Lvalue (Prim id) = lval
@@ -250,6 +291,47 @@ generateExprCode table reg expr = case expr of
   -- variable
   Var (Prim id) -> (Right("load " ++ (getReg reg) ++ "," ++ (show slot) ++ "\n"),
                     btype) where (btype, slot) = table Map.! id
+  -- Var (Arr id expr1) -> (code, btype) where
+  --                       (btype, slot) = table Map.! id
+  --                       (code1, type1) = generateExprCode table (reg + 1) expr1
+  --                       code = if type1 /= IntType then
+  --                               Left "array position can only be int"
+  --                              else do
+  --                                     -- load addr
+  --                                     let code2 = "load_address " ++ (getReg $ reg + 2) ++ "," ++ (show slot) ++ "\n"
+  --                                     -- get addr, offset is stored in reg1
+  --                                     let code3 = "add_offset " ++ (getReg $ reg + 3) ++ "," ++ (getReg $ reg + 2) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+  --                                     -- load *r3
+  --                                     let code4 = "load_indirect " ++ (getReg reg) ++ "," ++ (getReg $ reg + 3)
+  --                                     -- combine
+  --                                     code1 <++> Right (code2 ++ code3 ++ code4)
+  Var (Arr id expr1) -> (code, btype) where
+                        (code1, btype) = getArrayAddr table (reg + 1) (Arr id expr1)
+                        code2 = Right $ "load_indirect " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                        code = code1 <++> code2
+  -- Var (Mat id expr1 expr2) -> (code, btype) where
+  --                               (btype, slot) = table Map.! id
+  --                               (code1, type1) = generateExprCode table (reg + 1) expr1
+  --                               (code2, type2) = generateExprCode table (reg + 2) expr2
+  --                               code = if type1 /= IntType || type2 /= IntType then
+  --                                       Left "array position can only be int"
+  --                                     else do
+  --                                             -- load addr
+  --                                             let code3 = "load_address " ++ (getReg $ reg + 3) ++ "," ++ (show slot) ++ "\n"
+  --                                             -- get addr, offset is stored in reg1
+  --                                             let code4 = "add_offset " ++ (getReg $ reg + 4) ++ "," ++ (getReg $ reg + 3) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+  --                                             -- load *r4, address of array
+  --                                             let code5 = "load_indirect " ++ (getReg $ reg + 5) ++ "," ++ (getReg $ reg + 4)
+  --                                             -- get addr, offset is stored in reg2
+  --                                             let code6 = "add_offset " ++ (getReg $ reg + 6) ++ "," ++ (getReg $ reg + 5) ++ "," ++ (getReg $ reg + 2) ++ "\n"
+  --                                             -- load *r6
+  --                                             let code7 = "load_indirect " ++ (getReg reg) ++ "," ++ (getReg $ reg + 6)
+  --                                             code1 <++> code2 <++> Right (code3 ++ code4 ++ code5 ++ code6 ++ code7)
+  Var (Mat id expr1 expr2) -> (code, btype) where
+                              (code1, btype) = getArrayAddr table (reg + 1) (Mat id expr1 expr2)
+                              code2 = Right $ "load_indirect " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                              code = code1 <++> code2
+
   
   -- binary arithmetic ops
   Add expr1 expr2 -> binaryOpCode table "add" reg expr1 expr2
@@ -272,7 +354,13 @@ generateExprCode table reg expr = case expr of
   Not expr -> (code, BoolType) where (code1, type1) = generateExprCode table (reg + 1) expr
                                      code = if type1 == BoolType
                                              then code1 <++> Right ("not " ++ (getReg reg) ++ "," ++ (getReg (reg + 1)) ++ "\n")
-                                             else Left "cannot apply NOT op to non-boolean type!"                                         
+                                             else Left "cannot apply NOT op to non-boolean type!"
+  UnaryMinus expr -> (code1 <++> code2, type1) where
+                                    (code1, type1) = generateExprCode table (reg + 1) expr      
+                                    code2
+                                      | type1 == IntType = Right $ "neg_int " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                                      | type1 == FloatType = Right $ "neg_real " ++ (getReg reg) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                                      | otherwise = Left "UnaryMinus to a non int/float type"
 
   Bracket expr1 -> generateExprCode table reg expr1
 
@@ -318,3 +406,37 @@ binaryOpCode table instruction reg expr1 expr2 = (code1 <++> code2 <++> code3, t
             , BoolType)
     | otherwise = (Left "error binary op", type1)
 
+getArrayAddr :: Table -> Int -> Variable -> (Code, BaseType)
+getArrayAddr table reg (Arr id expr1)
+  = (code, btype) where
+    (btype, slot) = table Map.! id
+    (code1, type1) = generateExprCode table (reg + 1) expr1
+    code = if type1 /= IntType then
+            Left "array position can only be int"
+           else do
+                  -- load addr
+                  let code2 = "load_address " ++ (getReg $ reg + 2) ++ "," ++ (show slot) ++ "\n"
+                  -- get addr, offset is stored in reg1
+                  let code3 = "sub_offset " ++ (getReg reg) ++ "," ++ (getReg $ reg + 2) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                  -- combine
+                  code1 <++> Right (code2 ++ code3)
+getArrayAddr table reg (Mat id expr1 expr2)
+  = (code, btype) where
+    (btype, slot) = table Map.! id
+    (code1, type1) = generateExprCode table (reg + 1) expr1
+    (code2, type2) = generateExprCode table (reg + 2) expr2
+    code = if type1 /= IntType || type2 /= IntType then
+            Left "array position can only be int"
+          else do
+                  -- load addr to array
+                  let code3 = "load_address " ++ (getReg $ reg + 3) ++ "," ++ (show slot) ++ "\n"
+                  -- get addr, offset is stored in reg1
+                  let code4 = "sub_offset " ++ (getReg $ reg + 4) ++ "," ++ (getReg $ reg + 3) ++ "," ++ (getReg $ reg + 1) ++ "\n"
+                  -- load *r4, address of array
+                  let code5 = "load_indirect " ++ (getReg $ reg + 5) ++ "," ++ (getReg $ reg + 4) ++ "\n"
+                  -- get addr, offset is stored in reg2
+                  let code6 = "sub_offset " ++ (getReg reg) ++ "," ++ (getReg $ reg + 5) ++ "," ++ (getReg $ reg + 2) ++ "\n"
+                  -- combine
+                  code1 <++> code2 <++> Right (code3 ++ code4 ++ code5 ++ code6)
+                  -- let code5 = "sub_offset " ++ (getReg reg) ++ "," ++ (getReg $ reg + 4) ++ "," ++ (getReg $ reg + 2) ++ "\n"
+                  -- code1 <++> code2 <++> Right (code3 ++ code4 ++ code5)
