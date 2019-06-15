@@ -1,7 +1,6 @@
 {-|
 Module      : Main
 Description : Main module for Goat compiler.
-Author      : Chunyao Wang
 
 This is the main module for the project. This module is a modification
 of the version provided by Professor Sondergaard in the email.

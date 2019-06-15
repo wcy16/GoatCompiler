@@ -1,7 +1,7 @@
 {-|
 Module      : GoatAST
-Description : Data structures to represent abstract syntax trees (ASTs) for Goat. 
-Author      : Chunyao Wang
+Description : Data structures to represent abstract syntax trees (ASTs) for 
+              Goat. 
 -}
 
 module GoatAST where

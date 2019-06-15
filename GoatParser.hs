@@ -1,8 +1,7 @@
 {-|
 Module      : GoatParser
-Description : A parser for Goat written using the Parsec parser combinator library.
-              It depends on GoatAST.hs.
-Author      : Chunyao Wang
+Description : A parser for Goat written using the Parsec parser combinator 
+              library. It depends on GoatAST.hs.
 -}
 
 module GoatParser where
@@ -113,7 +112,8 @@ pParams
 pParam :: Parser Param
 pParam
   = do
-      paramtype <- do {reserved "val"; return Val} <|> do {reserved "ref"; return Ref}
+      paramtype 
+        <- do {reserved "val"; return Val} <|> do {reserved "ref"; return Ref}
       basetype <- pBaseType
       ident <- identifier
       whiteSpace
@@ -247,8 +247,11 @@ pCall
 --  operations
 -----------------------------------------------------------------
 
-pExp, pOr, pAnd, pNot, pRelational, pAddMinus, pFactor, pUminus, pConst, pVarExp, pString :: Parser Expr
-pOrOp, pAndOp, pRelationalOp, pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
+pExp, pOr, pAnd, pNot, 
+    pRelational, pAddMinus, pFactor, 
+    pUminus, pConst, pVarExp, pString :: Parser Expr
+pOrOp, pAndOp, pRelationalOp, 
+    pAddMinusOp, pMulDivOp :: Parser (Expr -> Expr -> Expr)
 
 pExp 
   = pString
