@@ -1,7 +1,11 @@
 {-|
 Module      : CodeGenerate
 Description : Generate codes for Oz 
-Author      : Chunyao Wang
+
+Perform semantic analyse and code generate.
+known bugs:
+  call by value-results
+  strict logical operators
 -}
 
 module CodeGenerate where
