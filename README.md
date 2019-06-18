@@ -1,6 +1,7 @@
 ## Introduction
 
-This program contains a parser for a programming language called Goat.
+This program implements a compiler for a programming language called Goat. The target machine is called Oz.  
+This is a project for COMP90045 2019 s1.
 
 ## How to compile
 
