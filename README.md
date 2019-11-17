@@ -1,5 +1,7 @@
 ## Introduction
 
+[![Build Status](https://travis-ci.org/wcy16/GoatCompiler.svg?branch=master)](https://travis-ci.org/wcy16/GoatCompiler)
+
 This program implements a compiler for a programming language called Goat. The target machine is called Oz.  
 This is a project for COMP90045 2019 s1.
 
