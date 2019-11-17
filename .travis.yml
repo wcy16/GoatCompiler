@@ -1,4 +1,9 @@
 language: haskell
 ghc:
   - "8.6.4"
+
+git:
+  depth: 3
+
+install: skip
 script: make
